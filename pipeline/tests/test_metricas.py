@@ -37,8 +37,16 @@ class CalcularMetricasTest(unittest.TestCase):
         self.assertEqual(calcular_metricas(precos("x", "10.00", "10.01")).preco_medio, Decimal("10.01"))
 
     def test_arredonda_uma_unica_vez(self):
-        # 0.004 + 0.004 + 0.007 = 0.015 / 3 = 0.005 -> 0.01. Arredondar cada preço antes daria 0.00.
-        self.assertEqual(calcular_metricas(precos("x", "0.004", "0.004", "0.007")).preco_medio, Decimal("0.01"))
+        # (0.02 + 0.03) / 2 = 0.025 exato: um único arredondamento HALF_UP dá 0.03.
+        self.assertEqual(calcular_metricas(precos("x", "0.02", "0.03")).preco_medio, Decimal("0.03"))
+
+    def test_media_segue_o_modo_configurado(self):
+        # O empate é resolvido por MODO_ARREDONDAMENTO: trocar o modo muda a média.
+        from unittest import mock
+        from decimal import ROUND_HALF_EVEN
+
+        with mock.patch("shopbrasil_pipeline.dominio.metricas.MODO_ARREDONDAMENTO", ROUND_HALF_EVEN):
+            self.assertEqual(calcular_metricas(precos("x", "0.02", "0.03")).preco_medio, Decimal("0.02"))
 
     def test_dizima_periodica(self):
         resultado = calcular_metricas(precos("x", "10", "10", "11"))
@@ -51,8 +59,13 @@ class CalcularMetricasTest(unittest.TestCase):
         self.assertEqual(resultado.quantidade_produtos, 1)
 
     def test_media_exata_sem_duplo_arredondamento(self):
-        # Média exata 1/3 + 0.005 fica acima do empate: arredonda para cima, nunca no empate.
-        self.assertEqual(calcular_metricas(precos("x", "0.01", "0.01", "0.005")).preco_medio, Decimal("0.01"))
+        # Dízimas ficam fora do empate e decidem pela fração exata: 0.01333… -> 0.01 e 0.01666… -> 0.02.
+        self.assertEqual(calcular_metricas(precos("x", "0.01", "0.01", "0.02")).preco_medio, Decimal("0.01"))
+        self.assertEqual(calcular_metricas(precos("x", "0.01", "0.02", "0.02")).preco_medio, Decimal("0.02"))
+
+    def test_minimo_e_maximo_nao_sao_arredondados(self):
+        with self.assertRaisesRegex(ValueError, "mais de duas casas"):
+            calcular_metricas(precos("x", "10.005", "11"))
 
     def test_media_entre_minimo_e_maximo(self):
         resultado = calcular_metricas(precos("x", "109.95", "22.3", "55.99", "15.99"))
