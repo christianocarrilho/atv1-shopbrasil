@@ -13,3 +13,6 @@ __pycache__/
 .venv/
 
 .DS_Store
+
+# Saídas locais de e2e/executar_todos.sh
+e2e/resultados/
