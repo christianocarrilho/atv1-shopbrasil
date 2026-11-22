@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+# Autor: Christiano Henrique Carrilho Lopes da Silva
+# Código de pessoa: 1691353
+# Matrícula: 262987
+# Cenário E2E integrado (#23): Airflow → PostgreSQL → Web/API → painel no mesmo projeto Compose.
+# O DAG real coleta da FakeStore controlada e publica três dias: 20/11 com o catálogo padrão,
+# 21/11 com uma categoria inédita (toys) e 22/11 sem jewelery. Depois confere, para cada dia, que
+# snapshot, histórico da run, API e tabela do painel mostram os mesmos valores; que a categoria
+# nova foi cadastrada e a ausente continua no cadastro; que a evolução tem lacunas (null) nos dias
+# sem a categoria; e que reprocessar a run de 21/11 mantém a data de referência e não duplica
+# data+categoria nem run+categoria. Os cenários isolados por módulo ficam em e2e/<módulo>/.
+#
+# Uso: e2e/integrado/executar.sh
+# Variáveis opcionais: E2E_AIRFLOW_API_PORT (padrão 18120), E2E_WEB_PORT (padrão: próxima livre) e
+# E2E_MANTER=1 (não remove o projeto).
+
+E2E_NOME=integrado
+E2E_PORTA_PADRAO=18120
+E2E_COMPOSE_EXTRA="e2e/pipeline/compose.e2e.yml"
+E2E_FAKESTORE_BASE_URL="http://fakestore:8000"
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/comum.sh"
+
+WEB_PORT="${E2E_WEB_PORT:-$(porta_livre $((AIRFLOW_API_PORT_E2E + 1)))}"
+echo "SHOPBRASIL_WEB_PORT=$WEB_PORT" >>"$ENV_FILE"
+BASE="http://127.0.0.1:$WEB_PORT"
+DAG_ID="shopbrasil_metricas"
+
+leitor_sql() { psql_como shopbrasil_reader "$READER_PASSWORD" shopbrasil -c "$1"; }
+fakestore() {
+  dc exec -T fakestore python -c '
+import sys, urllib.request
+pedido = urllib.request.Request("http://localhost:8000/_controle", data=sys.argv[1].encode(), method="POST")
+urllib.request.urlopen(pedido).read()' "$1" >/dev/null
+}
+json() {
+  curl -sS --max-time 10 "$BASE$1" | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin), ensure_ascii=False, separators=(",", ":")))'
+}
+# Formatos comuns "codigo=médio/mínimo/máximo/quantidade;..." em ordem de código.
+snapshot_do_dia() {
+  leitor_sql "SELECT coalesce(string_agg(c.codigo || '=' || m.preco_medio || '/' || m.preco_minimo || '/' || m.preco_maximo || '/' || m.quantidade_produtos, ';' ORDER BY c.codigo), '')
+    FROM metricas_categoria m JOIN categoria c ON c.id = m.categoria_id WHERE m.data_referencia = '$1'"
+}
+historico_da_run() {
+  leitor_sql "SELECT coalesce(string_agg(c.codigo || '=' || h.preco_medio || '/' || h.preco_minimo || '/' || h.preco_maximo || '/' || h.quantidade_produtos, ';' ORDER BY c.codigo), '')
+    FROM metricas_categoria_historico h JOIN categoria c ON c.id = h.categoria_id WHERE h.run_id = '$1'"
+}
+api_do_dia() {
+  json "/api/metricas?data=$1" | python3 -c 'import json,sys; print(";".join("%s=%s/%s/%s/%s" % (m["categoria"]["codigo"], m["preco_medio"], m["preco_minimo"], m["preco_maximo"], m["quantidade_produtos"]) for m in json.load(sys.stdin)["metricas"]))'
+}
+painel_do_dia() {
+  # Tabela do painel no mesmo formato; a descrição publicada pelo DAG é o próprio código.
+  curl -sS --max-time 10 "$BASE/?data=$1" | python3 "$ROOT/e2e/web/fixtures/pagina.py" | cut -d'|' -f4 \
+    | python3 -c 'import sys; l=sys.stdin.read().strip(); print(";".join(r.split("/",1)[0] + "=" + r.split("/",1)[1] for r in l.split(";")) if l else "")'
+}
+evolucao() {
+  # evolucao <código URL> <início> <fim>: "data=preço" por dia, None nos dias sem observação.
+  json "/api/evolucao?categoria=$1&inicio=$2&fim=$3" | python3 -c 'import json,sys; print(" ".join("%s=%s" % (p["data"], p["preco_medio"]) for p in json.load(sys.stdin)["pontos"]))'
+}
+publicar_dia() {
+  # publicar_dia <rótulo> <catálogo> <ocorrência UTC> <run_id>
+  fakestore "{\"respostas\": [{\"catalogo\": \"$2\"}]}"
+  airflow_cli dags trigger "$DAG_ID" --logical-date "$3" --run-id "$4" >/dev/null 2>&1
+  verificar "$1 run $4" "success" "$(aguardar_run "$DAG_ID" "$4")"
+}
+
+PADRAO="electronics=86.50/64.00/109.00/2;jewelery=695.00/695.00/695.00/1;men's clothing=66.13/22.30/109.95/2;women's clothing=9.85/9.85/9.85/1"
+COM_NOVA="electronics=86.50/64.00/109.00/2;jewelery=695.00/695.00/695.00/1;men's clothing=66.13/22.30/109.95/2;toys=67.76/15.50/120.01/2;women's clothing=9.85/9.85/9.85/1"
+SEM_JOIAS="electronics=64.00/64.00/64.00/1;men's clothing=109.95/109.95/109.95/1;women's clothing=9.85/9.85/9.85/1"
+
+echo "Projeto Compose isolado: $PROJECT (Airflow em 127.0.0.1:$AIRFLOW_API_PORT_E2E, web em $BASE)"
+subir_airflow "N0 subida do Airflow"
+if dc up -d --build --wait --wait-timeout 300 web >"$LOG_DIR/up-web.log" 2>&1; then
+  registrar PASS "N0 subida da web" "up --build --wait concluído"
+else
+  registrar FAIL "N0 subida da web" "ver $LOG_DIR/up-web.log"; resumo
+fi
+if aguardar_dag "$DAG_ID"; then registrar PASS "N0 DAG registrado" "$DAG_ID"; else registrar FAIL "N0 DAG registrado" "ausente"; resumo; fi
+verificar "N0 painel antes da primeira publicação" "null" "$(json /api/metricas/ultima-data | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["data"]))')"
+
+# N1. Três coletas válidas publicadas pelo DAG (ocorrências das 06:00 de Brasília).
+RUN_20="e2e__integrado_2026-11-20"; RUN_21="e2e__integrado_2026-11-21"; RUN_22="e2e__integrado_2026-11-22"
+publicar_dia "N1" padrao "2026-11-20T09:00:00+00:00" "$RUN_20"
+publicar_dia "N1" com_nova "2026-11-21T09:00:00+00:00" "$RUN_21"
+publicar_dia "N1" sem_joias "2026-11-22T09:00:00+00:00" "$RUN_22"
+
+# N2. Mesmos valores no snapshot, no histórico da run, na API e na tabela do painel.
+for caso in "2026-11-20|$RUN_20|$PADRAO" "2026-11-21|$RUN_21|$COM_NOVA" "2026-11-22|$RUN_22|$SEM_JOIAS"; do
+  IFS='|' read -r dia run esperado <<<"$caso"
+  verificar "N2 $dia snapshot|histórico|API|painel" "$esperado|$esperado|$esperado|$esperado" \
+    "$(snapshot_do_dia "$dia")|$(historico_da_run "$run")|$(api_do_dia "$dia")|$(painel_do_dia "$dia")"
+done
+verificar "N2 painel abre na última data publicada" "2026-11-22|2026-11-22" \
+  "$(curl -sS "$BASE/" | python3 "$ROOT/e2e/web/fixtures/pagina.py" | cut -d'|' -f1,2)"
+
+# N3. Categoria inédita cadastrada sem editar o DAG; categoria ausente continua no cadastro.
+verificar "N3 cadastro com toys e jewelery" "electronics,jewelery,men's clothing,toys,women's clothing" \
+  "$(json /api/categorias | python3 -c 'import json,sys; print(",".join(c["codigo"] for c in json.load(sys.stdin)["categorias"]))')"
+verificar "N3 presença por data" "20:4 21:5 22:3" \
+  "$(leitor_sql "SELECT string_agg(to_char(data_referencia, 'DD') || ':' || n, ' ' ORDER BY data_referencia) FROM (SELECT data_referencia, count(*) n FROM metricas_categoria GROUP BY 1) t")"
+
+# N4. Evolução com lacunas: null (não zero) nos dias em que a categoria não foi publicada.
+verificar "N4 evolução de jewelery" "2026-11-20=695.00 2026-11-21=695.00 2026-11-22=None" "$(evolucao jewelery 2026-11-20 2026-11-22)"
+verificar "N4 evolução de toys" "2026-11-20=None 2026-11-21=67.76 2026-11-22=None" "$(evolucao toys 2026-11-20 2026-11-22)"
+verificar "N4 série do painel igual à API" "$(json '/api/evolucao?categoria=toys&inicio=2026-11-20&fim=2026-11-22')" \
+  "$(curl -sS "$BASE/?categoria=toys&inicio=2026-11-20&fim=2026-11-22" | python3 -c 'import json,re,sys; p=sys.stdin.read(); print(json.dumps(json.loads(re.search(r"id=\"evolucao-dados\">(.*?)</script>", p, re.S).group(1)), ensure_ascii=False, separators=(",", ":")))')"
+
+# N5. Reprocessar a run de 21/11: mesma data de referência, sem duplicatas, valores estáveis.
+ANTES="$(snapshot_do_dia 2026-11-21)|$(historico_da_run "$RUN_21")"
+fakestore '{"respostas": [{"catalogo": "com_nova"}]}'
+airflow_cli tasks clear "$DAG_ID" -s "2026-11-21T09:00:00+00:00" -e "2026-11-21T09:00:00+00:00" -y >/dev/null 2>&1
+sleep 3
+verificar "N5 run reprocessada" "success" "$(aguardar_run "$DAG_ID" "$RUN_21")"
+verificar "N5 data de referência estável" "$RUN_21|2026-11-21" "$(admin_sql airflow "SELECT x.value->>'run_id' || '|' || (x.value->>'data_referencia')
+  FROM xcom_v2 x JOIN task_instance ti ON ti.id = x.task_instance_id
+  WHERE ti.dag_id = '$DAG_ID' AND ti.run_id = '$RUN_21' AND ti.task_id = 'preparacao.identificar' AND x.key = 'return_value'
+  ORDER BY ti.try_number DESC LIMIT 1")"
+verificar "N5 snapshot e histórico iguais aos de antes" "$ANTES" "$(snapshot_do_dia 2026-11-21)|$(historico_da_run "$RUN_21")"
+verificar "N5 sem duplicatas por data+categoria e run+categoria" "1|1" \
+  "$(leitor_sql "SELECT max(n) FROM (SELECT count(*) n FROM metricas_categoria GROUP BY data_referencia, categoria_id) t")|$(leitor_sql "SELECT max(n) FROM (SELECT count(*) n FROM metricas_categoria_historico GROUP BY run_id, categoria_id) t")"
+
+# N6. Falha definitiva da FakeStore numa nova ocorrência preserva tudo o que já foi publicado.
+CONTAGENS="$(leitor_sql "SELECT (SELECT count(*) FROM metricas_categoria) || '|' || (SELECT count(*) FROM metricas_categoria_historico)")"
+fakestore '{"respostas": [{"status": 500}, {"status": 500}, {"status": 500}, {"status": 500}]}'
+airflow_cli dags trigger "$DAG_ID" --logical-date "2026-11-23T09:00:00+00:00" --run-id "e2e__integrado_falha" >/dev/null 2>&1
+verificar "N6 run com falha definitiva" "failed" "$(aguardar_run "$DAG_ID" "e2e__integrado_falha" 150)"
+verificar "N6 dados e painel preservados" "$CONTAGENS|2026-11-22" \
+  "$(leitor_sql "SELECT (SELECT count(*) FROM metricas_categoria) || '|' || (SELECT count(*) FROM metricas_categoria_historico)")|$(json /api/metricas/ultima-data | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"])')"
+
+resumo
