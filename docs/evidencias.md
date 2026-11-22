@@ -255,3 +255,25 @@ Testes unitários: `Ran 62 tests ... OK`. Cobrem catálogo válido sem arredonda
 Ajustes descobertos na verificação:
 - Importar `AirflowFailException` de `airflow.sdk.exceptions`, porque o caminho antigo está depreciado no 3.4.
 - As consultas ad hoc ao DagBag no E2E usam o `PYTHONPATH` dos processos do Airflow, que inclui a pasta de DAGs.
+
+## #18 — Histórico por run na transação de publicação
+
+Validação executada em 22 nov. 2026, com Docker 29.9.2, Docker Compose v5.6.1 e Python 3.14.7 (macOS), sobre a revisão eebc845 (base `integracao-backlog` c7e5d74). O desenho está no [README da infraestrutura](../pipeline/shopbrasil_pipeline/infraestrutura/README.md#histórico-por-run-18).
+
+Comando: `e2e/publicacao/executar.sh`, o mesmo cenário da #17, estendido com as verificações H1 a H4. `composicao.publicar_snapshot()` agora grava o histórico na mesma transação, por isso U1 a U10 também exercitam a etapa. U1 confere o histórico vazio, e U8 e U9 conferem que ele fica preservado. Duração observada: cerca de 40 s. Código de saída 0, 44 verificações PASS, 0 FAIL.
+
+| Cenário | Resultado | Observado |
+|---|---|---|
+| H1 primeira publicação grava o histórico | PASS | `scheduled__2026-11-20…`: `electronics=2026-11-20/20.00/15.00/25.00/2`, `men's clothing=2026-11-20/30.00/30.00/30.00/1`; `scheduled__2026-11-21…`: `electronics=2026-11-21/10.00/10.00/10.01/3`, `jewelery=2026-11-21/10.01/10.00/10.01/2`; junção com o snapshot pela data: `2|0;2|0` (linhas, divergentes) |
+| H2 reprocessar a mesma run com métricas diferentes | PASS | snapshot de 2026-11-21 substituído (U5, U6), histórico da run com `electronics` e `jewelery` nos valores originais e o mesmo `run:categoria@xmin` de H1; `women's clothing`, chave nova da run, acrescentada; 5 linhas, máximo 1 por run+categoria |
+| U8 falha injetada depois do histórico | PASS | a etapa viu 4 linhas da run no histórico dentro da transação (com `toys`); após o rollback, histórico, snapshot e cadastro iguais aos anteriores |
+| U9 falha do banco no snapshot | PASS | histórico inalterado (valores e `xmin`) |
+| H3 violação de CHECK no histórico | PASS | run_id `" "` → `CheckViolation` em `metricas_categoria_historico_run_id_ck`; snapshot de 2026-11-21 com os mesmos valores e `id@xmin` (`7@1257 8@1257`), `toys` não cadastrada, histórico inalterado |
+| H4 run distinta acrescenta | PASS | `manual__2026-11-21T15:00:00+00:00`: snapshot do dia substituído por `electronics=14.00/13.00/15.00/5`, `jewelery=11.00/11.00/11.00/1`; histórico da run com os mesmos valores (`2|0`); linhas das outras runs com o mesmo `xmin`; 7 linhas, máximo 1 por run+categoria, 2 runs para `electronics` em 2026-11-21 |
+
+No reprocessamento da mesma run, `ON CONFLICT (run_id, categoria_id) DO NOTHING` preserva só as chaves já gravadas. Se a coleta reprocessada trouxer uma categoria que a run ainda não tinha, ela é acrescentada, como `women's clothing` em H2. O `e2e/pipeline/executar.sh` foi repetido na mesma revisão porque o pacote montado no Airflow mudou: código de saída 0, 32 verificações PASS, sem alteração no DAG.
+
+| Verificação | Comando | Resultado observado |
+|---|---|---|
+| Testes unitários | `python3 -m unittest discover -s pipeline/tests -t pipeline` | `Ran 57 tests ... OK` (6 novos: SQL e parâmetros da etapa, mesmos `Decimal` do snapshot, sem controle de transação, ordem antes do único commit, rollback quando o histórico falha, ligação na composição) |
+| Lint de arquitetura | `python3 qualidade/lint_arquitetura.py` | `OK: 20 arquivo(s) Python verificado(s), nenhuma violação de arquitetura.` |
