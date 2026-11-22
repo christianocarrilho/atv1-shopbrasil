@@ -1,0 +1,11 @@
+# Autor: Christiano Henrique Carrilho Lopes da Silva
+# Código de pessoa: 1691353
+# Matrícula: 262987
+# Override do cenário E2E do esquema (#3). Monta as fixtures SQL do cenário no db-init, para
+# testar o rollback de um esquema com erro sem alterar o db/schema.sql versionado.
+# Os caminhos são relativos à raiz do projeto, primeiro arquivo passado ao docker compose.
+
+services:
+  db-init:
+    volumes:
+      - ./e2e/esquema/fixtures:/e2e:ro

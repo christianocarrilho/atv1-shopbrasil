@@ -23,4 +23,4 @@ Copie `.env.example` para `.env` se o arquivo local ainda não existir e preench
 docker compose up -d --wait
 ```
 
-O Airflow fica em http://localhost:8080. O [guia do ambiente Docker](docs/ambiente-docker.md) descreve serviços, contas, Connection, pool e comandos. O cenário E2E do ambiente roda com `e2e/ambiente/executar.sh`.
+O Airflow fica em http://localhost:8080. O [guia do ambiente Docker](docs/ambiente-docker.md) descreve serviços, contas, Connection, pool e comandos. O [modelo de dados](docs/modelo-dados.md) descreve as tabelas de `db/schema.sql`. Os cenários E2E do ambiente e do esquema rodam com `e2e/ambiente/executar.sh` e `e2e/esquema/executar.sh`.

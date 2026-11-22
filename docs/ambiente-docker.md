@@ -11,7 +11,7 @@ Este documento descreve o ambiente do [docker-compose.yml](../docker-compose.yml
 | Serviço | Imagem | Papel |
 |---|---|---|
 | `postgres` | `postgres:18.7` | Um servidor com dois bancos: `airflow` (metadados) e `shopbrasil` (analítico). Volume `postgres-data` em `/var/lib/postgresql`. Sem porta publicada no host. |
-| `db-init` | `postgres:18.7` | Execução única. Roda [db/aplicar.sh](../db/aplicar.sh): cria contas e bancos com [db/acessos.sql](../db/acessos.sql) e aplica `db/schema.sql` quando o arquivo existe. |
+| `db-init` | `postgres:18.7` | Execução única. Roda [db/aplicar.sh](../db/aplicar.sh): cria contas e bancos com [db/acessos.sql](../db/acessos.sql) e aplica [db/schema.sql](../db/schema.sql) numa única transação. |
 | `airflow-init` | `apache/airflow:3.4.0-python3.12` | Execução única. Migra os metadados, cria o usuário da interface e define `ecommerce_pool` com 2 slots. |
 | `airflow-apiserver` | idem | Interface e API em `http://localhost:${AIRFLOW_API_PORT}` (padrão 8080, só em 127.0.0.1). |
 | `airflow-scheduler` | idem | Agenda e executa as tasks com LocalExecutor. |
@@ -58,7 +58,7 @@ Os privilégios padrão (`ALTER DEFAULT PRIVILEGES FOR ROLE <administrativa> IN 
 
 ## Coordenação com a #3 e com a Web/API
 
-- **#3**: entregue o DDL em `db/schema.sql`, idempotente e no esquema `public`. O `db-init` aplica o arquivo com a conta administrativa e `ON_ERROR_STOP=1`, depois de `db/acessos.sql`. Enquanto o arquivo não existir, o `db-init` registra `AVISO /db/schema.sql não encontrado` e conclui. O cenário E2E da #2 verifica os privilégios de todas as tabelas de `public`, então passa a cobrir as tabelas da #3 sem alteração.
+- **#3**: o DDL está em [db/schema.sql](../db/schema.sql), idempotente e no esquema `public`, e o [modelo de dados](modelo-dados.md) descreve as tabelas. O `db-init` aplica o arquivo com a conta administrativa, `ON_ERROR_STOP=1` e `--single-transaction`, depois de `db/acessos.sql`. Sem o arquivo, o `db-init` registra `AVISO /db/schema.sql não encontrado` e conclui. O cenário E2E da #2 verifica os privilégios de todas as tabelas de `public` e cobre as tabelas da #3; o cenário `e2e/esquema` cobre o DDL.
 - **Web/API (#9)**: acrescente ao Compose um serviço próprio, construído a partir de `web/`, que dependa do `db-init` concluído e receba apenas `SHOPBRASIL_DB_HOST`, `SHOPBRASIL_DB_PORT`, `SHOPBRASIL_DB_NAME` e as variáveis `SHOPBRASIL_DB_READER_*`. O Airflow não depende desse serviço.
 
 ## Comandos
