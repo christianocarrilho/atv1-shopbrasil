@@ -13,6 +13,7 @@ from shopbrasil_pipeline.aplicacao.alertas import (
     OcorrenciaTask,
     notificar_falha,
     notificar_falha_ingestao,
+    notificar_falha_run,
     notificar_retry,
     notificar_sucesso,
 )
@@ -55,6 +56,17 @@ class AlertasTest(unittest.TestCase):
         self.assertEqual(len(registro.alertas), 1)
         self.assertIn("run-9", registro.alertas[0][0])
         self.assertIn("esgotou 4 tentativa(s)", registro.alertas[0][1])
+
+    def test_falha_sem_retentativa_nao_diz_que_esgotou(self):
+        registro = Registro()
+        notificar_falha_ingestao(registro, OcorrenciaTask("d", "run-1", "ingestao.buscar_produtos", 1, 4, "AirflowFailException"))
+        self.assertIn("sem retentativa (erro não recuperável) na tentativa 1/4", registro.alertas[0][1])
+        self.assertNotIn("esgotou", registro.alertas[0][1])
+
+    def test_falha_da_run(self):
+        registro = Registro()
+        notificar_falha_run(registro, "shopbrasil_metricas", "run-2", None)
+        self.assertEqual(registro.avisos, ["[SHOPBRASIL][FALHA RUN] dag=shopbrasil_metricas run=run-2 motivo=não informado"])
 
     def test_notificador_log_simula_envio(self):
         with self.assertLogs("shopbrasil.alertas") as capturado:

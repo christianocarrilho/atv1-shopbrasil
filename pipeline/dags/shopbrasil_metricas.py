@@ -8,6 +8,10 @@ Define a orquestração com TaskFlow: o DAG aciona casos de uso da aplicação e
 HTTP nem fórmulas. As dependências vêm das chamadas entre as funções e as etapas ficam em
 TaskGroups de preparação, ingestão, análise e publicação.
 
+Callbacks (#14): Buscar Produtos tem callbacks de sucesso, retry e falha, e a falha definitiva
+simula o envio de alerta. Toda outra task herda de ``default_args`` o aviso de falha, gravado no
+log da própria tentativa, e o DAG avisa a falha da run inteira, inclusive a marcada pela UI.
+
 A agenda usa ``CronTriggerTimetable`` explícito: no Airflow 3.4 a data lógica de cada run é a
 própria ocorrência das 06:00 em ``America/Sao_Paulo``, sem intervalo de dados a deslocar a data.
 Buscar Produtos (#13) usa a FakeStore pela composição. As tasks de análise e publicação são o
@@ -29,6 +33,7 @@ from shopbrasil_pipeline.aplicacao.alertas import (
     OcorrenciaTask,
     notificar_falha,
     notificar_falha_ingestao,
+    notificar_falha_run,
     notificar_retry,
     notificar_sucesso,
 )
@@ -59,13 +64,17 @@ log = logging.getLogger(__name__)
 def _ocorrencia(contexto) -> OcorrenciaTask:
     """Traduz o contexto do callback do Airflow para a ocorrência da aplicação."""
     ti = contexto["ti"]
+    retries = contexto["task"].retries
     erro = contexto.get("exception")
+    # Depois de um clear, try_number continua crescendo e max_tries = try_number + retries.
+    # A tentativa é contada no ciclo atual, como faz o próprio Airflow ao decidir o retry.
+    inicio_ciclo = getattr(ti, "max_tries", retries) - retries
     return OcorrenciaTask(
         dag_id=ti.dag_id,
         run_id=ti.run_id,
         task_id=ti.task_id,
-        tentativa=ti.try_number,
-        max_tentativas=contexto["task"].retries + 1,
+        tentativa=ti.try_number - inicio_ciclo,
+        max_tentativas=retries + 1,
         erro=f"{type(erro).__name__}: {erro}" if erro else None,
     )
 
@@ -88,6 +97,12 @@ def busca_falha(contexto) -> None:
     notificar_falha_ingestao(composicao.notificador(), _ocorrencia(contexto))
 
 
+def avisar_falha_run(contexto) -> None:
+    # Callback do DAG: no Airflow 3 roda no dag-processor, e a linha vai para o log dele.
+    dag_run = contexto["dag_run"]
+    notificar_falha_run(composicao.notificador(), dag_run.dag_id, dag_run.run_id, contexto.get("reason"))
+
+
 @dag(
     dag_id=DAG_ID,
     schedule=CronTriggerTimetable(AGENDA_CRON, timezone=FUSO),
@@ -95,6 +110,7 @@ def busca_falha(contexto) -> None:
     catchup=False,
     max_active_runs=1,
     default_args={"on_failure_callback": avisar_falha},
+    on_failure_callback=avisar_falha_run,
     tags=["shopbrasil", "fakestore"],
     doc_md=__doc__,
 )

@@ -64,12 +64,25 @@ def notificar_falha(notificador: Notificador, ocorrencia: OcorrenciaTask) -> Non
 
 
 def notificar_falha_ingestao(notificador: Notificador, ocorrencia: OcorrenciaTask) -> None:
-    """Falha definitiva da ingestão: aviso e alerta, pois as tentativas se esgotaram."""
+    """Falha definitiva da ingestão: aviso e alerta.
+
+    A falha é definitiva quando as tentativas se esgotam ou quando o erro não é recuperável (por
+    exemplo, configuração inválida), caso em que a task falha antes da última tentativa.
+    """
     notificar_falha(notificador, ocorrencia)
+    if ocorrencia.tentativa >= ocorrencia.max_tentativas:
+        causa = f"Buscar Produtos esgotou {ocorrencia.max_tentativas} tentativa(s)"
+    else:
+        causa = (
+            f"Buscar Produtos falhou sem retentativa (erro não recuperável) na tentativa "
+            f"{ocorrencia.tentativa}/{ocorrencia.max_tentativas}"
+        )
     notificador.enviar_alerta(
         assunto=f"ShopBrasil: ingestão da FakeStore falhou na run {ocorrencia.run_id}",
-        mensagem=(
-            f"Buscar Produtos esgotou {ocorrencia.max_tentativas} tentativa(s); "
-            f"a publicação da run não ocorreu. {ocorrencia.descricao()}"
-        ),
+        mensagem=f"{causa}; a publicação da run não ocorreu. {ocorrencia.descricao()}",
     )
+
+
+def notificar_falha_run(notificador: Notificador, dag_id: str, run_id: str, motivo: str | None) -> None:
+    """Aviso de falha da run inteira, inclusive quando nenhuma task chamou o próprio callback."""
+    notificador.registrar(f"{PREFIXO}[FALHA RUN] dag={dag_id} run={run_id} motivo={motivo or 'não informado'}")
