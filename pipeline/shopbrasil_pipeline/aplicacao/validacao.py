@@ -6,7 +6,8 @@ Matrícula: 262987
 
 Confere a projeção entregue pela #13 antes de qualquer cálculo. Catálogo que não é lista, catálogo
 vazio, categoria que não é texto ou está em branco, e preço que não é número, não é finito ou é
-negativo tornam o catálogo inteiro inválido, para que a publicação não ocorra e os dados já
+negativo, preço com mais de duas casas ou acima do limite de ``numeric(12,2)``, e categoria com espaços
+nas extremidades tornam o catálogo inteiro inválido, para que a publicação não ocorra e os dados já
 publicados fiquem como estão. Preço negativo é recusado aqui porque o esquema da #3 exige
 ``preco_minimo >= 0``. Uma categoria observada antes e ausente agora é normal: só os produtos
 recebidos entram no resultado. A saída mantém um registro por produto com o código da categoria e
@@ -21,6 +22,8 @@ from decimal import Decimal, InvalidOperation
 from shopbrasil_pipeline.aplicacao.catalogo import CatalogoColetado
 
 MAX_PROBLEMAS_NA_MENSAGEM = 10
+# Preços são gravados em numeric(12,2) (especificação): até duas casas e dez dígitos inteiros.
+PRECO_MAXIMO = Decimal("9999999999.99")
 
 
 class CatalogoInvalidoError(ValueError):
@@ -57,6 +60,10 @@ def _problema_preco(produto) -> str | None:
         return f"preço {produto.preco} não é finito"
     if valor < 0:
         return f"preço {produto.preco} negativo"
+    if valor.as_tuple().exponent < -2 and valor != valor.quantize(Decimal("0.01")):
+        return f"preço {produto.preco} com mais de duas casas decimais"
+    if valor > PRECO_MAXIMO:
+        return f"preço {produto.preco} acima do limite de numeric(12,2)"
     return None
 
 
@@ -75,6 +82,9 @@ def validar_catalogo(catalogo: CatalogoColetado) -> tuple[ProdutoValido, ...]:
             motivos.append(f"categoria do tipo {produto.tipo_categoria}")
         elif not produto.categoria or not produto.categoria.strip():
             motivos.append("categoria em branco")
+        elif produto.categoria != produto.categoria.strip():
+            # O código é a chave da categoria; " electronics" criaria uma categoria distinta de "electronics".
+            motivos.append(f"categoria {produto.categoria!r} com espaços nas extremidades")
         problema_preco = _problema_preco(produto)
         if problema_preco:
             motivos.append(problema_preco)
