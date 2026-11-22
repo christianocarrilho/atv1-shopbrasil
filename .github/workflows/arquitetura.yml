@@ -1,0 +1,28 @@
+# Autor: Christiano Henrique Carrilho Lopes da Silva
+# Código de pessoa: 1691353
+# Matrícula: 262987
+# Executa o lint de arquitetura (#26) e seus testes em cada PR e push na main.
+# Usa um Python próprio do CI porque o lint depende só da biblioteca padrão e
+# não deve acoplar às versões de runtime definidas na #1.
+name: Arquitetura
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint-arquitetura:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Testes do lint
+        run: python -m unittest discover -s qualidade/tests -v
+      - name: Lint de arquitetura
+        run: python qualidade/lint_arquitetura.py --listar

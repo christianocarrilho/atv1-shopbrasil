@@ -1,0 +1,134 @@
+# Autor: Christiano Henrique Carrilho Lopes da Silva
+# Código de pessoa: 1691353
+# Matrícula: 262987
+# Declara os módulos, as camadas e as dependências permitidas que o lint de
+# arquitetura (#26) verifica. As camadas usam lista de permissões para que
+# qualquer dependência nova exija uma alteração revisada desta configuração.
+#
+# Campos de cada camada:
+#   modulo        módulo dono da camada ("pipeline" ou "web").
+#   caminhos      arquivos ou diretórios, relativos à raiz do repositório.
+#                 O caminho mais específico define a camada de um arquivo.
+#   pode_importar outras camadas internas permitidas. A própria camada e a
+#                 raiz do pacote do mesmo módulo são sempre permitidas.
+#   terceiros     pacotes fora da biblioteca padrão. [] proíbe todos e ["*"]
+#                 libera todos. Os nomes valem pelo primeiro segmento.
+#   proibidos     prefixos de módulos vetados mesmo quando seriam liberados
+#                 acima, inclusive da biblioteca padrão.
+#   orientacao    correção sugerida no diagnóstico.
+#
+# Imports entre "pipeline" e "web" são sempre proibidos e não têm exceção
+# configurável. O esquema em db/ é o contrato entre os dois módulos.
+
+[modulos.pipeline]
+raiz = "pipeline"
+# Diretórios que entram no sys.path. O Airflow adiciona a pasta de DAGs.
+raizes_import = ["pipeline", "pipeline/dags"]
+# Arquivos .py dentro destes pacotes precisam pertencer a uma camada.
+pacotes = ["pipeline/shopbrasil_pipeline"]
+
+[modulos.web]
+raiz = "web"
+raizes_import = ["web"]
+pacotes = ["web/shopbrasil_web"]
+
+# --------------------------------------------------------------------- Pipeline
+
+[camadas.pipeline_raiz]
+modulo = "pipeline"
+caminhos = ["pipeline/shopbrasil_pipeline/__init__.py"]
+pode_importar = []
+terceiros = []
+proibidos = []
+orientacao = "Mantenha o __init__.py do pacote sem dependências internas; importe a camada diretamente."
+
+[camadas.pipeline_dominio]
+modulo = "pipeline"
+caminhos = ["pipeline/shopbrasil_pipeline/dominio"]
+pode_importar = []
+terceiros = []
+proibidos = ["http", "urllib.request", "socket", "ssl", "sqlite3"]
+orientacao = "O domínio depende apenas da biblioteca padrão. Mova a dependência para infraestrutura e exponha um contrato na aplicação."
+
+[camadas.pipeline_aplicacao]
+modulo = "pipeline"
+caminhos = ["pipeline/shopbrasil_pipeline/aplicacao"]
+pode_importar = ["pipeline_dominio"]
+terceiros = []
+proibidos = ["http", "urllib.request", "socket", "ssl", "sqlite3"]
+orientacao = "A aplicação usa o domínio e declara contratos. Defina um Protocol na aplicação e implemente-o em infraestrutura; a composição injeta o adaptador."
+
+[camadas.pipeline_infraestrutura]
+modulo = "pipeline"
+caminhos = ["pipeline/shopbrasil_pipeline/infraestrutura"]
+pode_importar = ["pipeline_aplicacao", "pipeline_dominio"]
+terceiros = ["*"]
+proibidos = []
+orientacao = "Os adaptadores implementam contratos da aplicação e usam tipos do domínio. Quem conecta adaptadores e DAG é a composição."
+
+[camadas.pipeline_composicao]
+modulo = "pipeline"
+caminhos = [
+  "pipeline/shopbrasil_pipeline/composicao.py",
+  "pipeline/shopbrasil_pipeline/composicao",
+  "pipeline/dags/composicao.py",
+  "pipeline/dags/composicao",
+]
+pode_importar = ["pipeline_aplicacao", "pipeline_dominio", "pipeline_infraestrutura"]
+terceiros = ["*"]
+proibidos = []
+orientacao = "A composição conecta contratos a adaptadores concretos e não depende dos DAGs."
+
+[camadas.pipeline_dags]
+modulo = "pipeline"
+caminhos = ["pipeline/dags"]
+pode_importar = ["pipeline_aplicacao", "pipeline_dominio", "pipeline_composicao"]
+terceiros = ["*"]
+proibidos = [
+  "psycopg", "psycopg2", "asyncpg", "sqlalchemy", "sqlite3",
+  "requests", "httpx", "urllib3", "aiohttp", "http.client", "urllib.request",
+  "airflow.providers.postgres", "airflow.providers.common.sql", "airflow.providers.http",
+]
+orientacao = "O DAG aciona casos de uso e a composição. Obtenha o adaptador pela composição e mantenha HTTP, SQL e transações em infraestrutura."
+
+# -------------------------------------------------------------------------- Web
+
+[camadas.web_raiz]
+modulo = "web"
+caminhos = ["web/shopbrasil_web/__init__.py"]
+pode_importar = []
+terceiros = []
+proibidos = []
+orientacao = "Mantenha o __init__.py do pacote sem dependências internas; importe a camada diretamente."
+
+[camadas.web_consultas]
+modulo = "web"
+caminhos = ["web/shopbrasil_web/consultas"]
+pode_importar = []
+terceiros = []
+proibidos = ["http", "urllib.request", "socket", "ssl", "sqlite3"]
+orientacao = "Consultas define casos de uso, modelos de leitura e contratos sem HTTP ou PostgreSQL. Declare o contrato aqui e implemente-o em infraestrutura."
+
+[camadas.web_apresentacao]
+modulo = "web"
+caminhos = ["web/shopbrasil_web/apresentacao"]
+pode_importar = ["web_consultas"]
+terceiros = ["*"]
+proibidos = ["psycopg", "psycopg2", "asyncpg", "sqlalchemy", "sqlite3"]
+orientacao = "A apresentação chama casos de uso de consultas. Receba o caso de uso pela composição em vez de acessar infraestrutura ou o banco."
+
+[camadas.web_infraestrutura]
+modulo = "web"
+caminhos = ["web/shopbrasil_web/infraestrutura"]
+pode_importar = ["web_consultas"]
+terceiros = ["*"]
+proibidos = []
+orientacao = "A infraestrutura implementa os contratos de consultas e não conhece a apresentação nem a composição."
+
+[camadas.web_composicao]
+modulo = "web"
+caminhos = ["web/shopbrasil_web/composicao.py", "web/shopbrasil_web/composicao"]
+pode_importar = ["web_apresentacao", "web_consultas", "web_infraestrutura"]
+terceiros = ["*"]
+proibidos = []
+orientacao = "A composição conecta apresentação, consultas e adaptadores."

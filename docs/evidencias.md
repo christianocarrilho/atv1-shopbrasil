@@ -24,3 +24,22 @@ Validação executada em 22 nov. 2026, com Docker 29.9.2 e Docker Compose v5.6.1
 | Chart.js | registro npm `chart.js/latest` | 4.6.1 |
 
 O arquivo `probe.sql` foi temporário e não faz parte do esquema. O DDL real pertence à #3.
+
+
+## Lint de arquitetura — #26
+
+Comando versionado, executado na raiz do repositório. O [README de qualidade](../qualidade/README.md) descreve as regras e os códigos de diagnóstico.
+
+```bash
+python3 qualidade/lint_arquitetura.py
+python3 -m unittest discover -s qualidade/tests
+```
+
+| Data | Base | Ambiente | Resultado |
+|---|---|---|---|
+| 2026-11-22 | `main` em `96fe6c1`, antes do código da #1 | Python 3.14.7 (macOS) | Lint: `OK: 0 arquivo(s) Python verificado(s), nenhuma violação de arquitetura.`, saída 0. Testes: `Ran 38 tests ... OK`. |
+| 2026-11-22 | `main` em `96fe6c1` | Python 3.11.16 | Testes: `Ran 38 tests ... OK`. |
+
+Os testes montam repositórios temporários com a configuração versionada. Cobrem um código conforme que passa e exemplos proibidos que falham: imports absolutos, relativos e dinâmicos entre `pipeline/` e `web/` (ARQ001), inversões de camada no Pipeline e na Web/API (ARQ002), pacote externo no domínio, na aplicação e em consultas (ARQ003), drivers, HTTP e hooks vetados no DAG e na apresentação (ARQ004), relativo que sai do pacote (ARQ005), arquivo sem camada (ARQ006), sintaxe inválida (ARQ007), saída 1 com `arquivo:linha:coluna` e saída 2 para configuração que tente liberar imports entre módulos.
+
+Cada PR de código registra o resultado do lint pelo [template de PR](../.github/pull_request_template.md) e pelo workflow `Arquitetura`.

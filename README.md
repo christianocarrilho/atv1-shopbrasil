@@ -13,6 +13,7 @@ Projeto da Atividade 01 de Orquestração de Workflows. O pipeline coleta o cat�
 - [Banco](db/) reúne o esquema compartilhado.
 - [Documentação](docs/) reúne decisões e guias de operação. Consulte o [enunciado da Atividade 01](<docs/Atividade 01 - Descrição.pdf>) para os requisitos acadêmicos.
 - [Testes E2E](e2e/) reúne a validação de ponta a ponta.
+- [Qualidade](qualidade/) reúne o lint de arquitetura. Execute `python3 qualidade/lint_arquitetura.py` na raiz do repositório.
 
 ## Configuração local
 
