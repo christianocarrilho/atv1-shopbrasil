@@ -1,0 +1,15 @@
+# Autor: Christiano Henrique Carrilho Lopes da Silva
+# Código de pessoa: 1691353
+# Matrícula: 262987
+# Mantém configurações locais e caches Python fora do controle de versão.
+
+.env
+.env.*
+!.env.example
+/.identificacao-academica.local.md
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+.DS_Store
