@@ -16,7 +16,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from decimal import Decimal
 
-from shopbrasil_pipeline.dominio.metricas import MetricasCategoria, PrecosCategoria
+from shopbrasil_pipeline.dominio.metricas import MetricasCategoria, PrecosCategoria, calcular_metricas
 
 
 class ConsolidacaoInvalidaError(ValueError):
@@ -29,6 +29,16 @@ def agrupar_por_categoria(produtos: Iterable[Mapping[str, str]]) -> tuple[Precos
     for produto in produtos:
         precos[produto["codigo_categoria"]].append(Decimal(produto["preco"]))
     return tuple(PrecosCategoria(codigo, tuple(valores)) for codigo, valores in sorted(precos.items()))
+
+
+def calcular_categoria(entrada: Mapping[str, object]) -> dict[str, object]:
+    """Caso de uso da instância mapeada: recebe ``PrecosCategoria`` em XCom e devolve as métricas em XCom."""
+    return calcular_metricas(PrecosCategoria.de_xcom(entrada)).para_xcom()
+
+
+def metricas_de_xcom(itens: Iterable[Mapping[str, object]]) -> tuple[MetricasCategoria, ...]:
+    """Reconstrói as métricas recebidas por XCom, no contrato da #15, para consolidar ou publicar."""
+    return tuple(MetricasCategoria.de_xcom(item) for item in itens)
 
 
 def consolidar_metricas(

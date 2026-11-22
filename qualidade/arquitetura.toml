@@ -82,14 +82,14 @@ orientacao = "A composição conecta contratos a adaptadores concretos e não de
 [camadas.pipeline_dags]
 modulo = "pipeline"
 caminhos = ["pipeline/dags"]
-pode_importar = ["pipeline_aplicacao", "pipeline_dominio", "pipeline_composicao"]
+pode_importar = ["pipeline_aplicacao", "pipeline_composicao"]
 terceiros = ["*"]
 proibidos = [
   "psycopg", "psycopg2", "asyncpg", "sqlalchemy", "sqlite3",
   "requests", "httpx", "urllib3", "aiohttp", "http.client", "urllib.request",
   "airflow.providers.postgres", "airflow.providers.common.sql", "airflow.providers.http",
 ]
-orientacao = "O DAG aciona casos de uso e a composição. Obtenha o adaptador pela composição e mantenha HTTP, SQL e transações em infraestrutura."
+orientacao = "O DAG aciona casos de uso e a composição, sem importar o domínio diretamente. Obtenha o adaptador pela composição e mantenha HTTP, SQL e transações em infraestrutura."
 
 # -------------------------------------------------------------------------- Web
 
