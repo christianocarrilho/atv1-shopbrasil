@@ -6,7 +6,8 @@
 # dados de teste pela conta administrativa (fixtures/snapshot.sql) e confere as rotas JSON pela
 # porta publicada em 127.0.0.1: data com métricas, última data, data sem registros, série com
 # lacunas em ordem de data, categorias, erros 422/400/404, preços como strings decimais e que a
-# conta da web só lê. O Airflow não sobe: a web depende só do esquema e da conta de leitura.
+# conta da web só lê. Página do painel (#19): abre na última data, filtro por data, estado vazio
+# e mesmos valores da API. O Airflow não sobe: a web depende só do esquema e da conta de leitura.
 #
 # Uso: e2e/web/executar.sh
 # Variáveis opcionais: E2E_AIRFLOW_API_PORT (porta da web neste cenário; padrão 18110, ou a
@@ -25,6 +26,8 @@ BASE="http://127.0.0.1:$WEB_PORT"
 json() {
   curl -sS --max-time 10 "$BASE$1" | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin), ensure_ascii=False, separators=(",", ":")))'
 }
+# pagina [query]: resumo da página do painel extraído por fixtures/pagina.py (#19).
+pagina() { curl -sS --max-time 10 "$BASE/$1" | python3 "$ROOT/e2e/web/fixtures/pagina.py"; }
 codigo_http() { curl -sS -o /dev/null --max-time 10 -w '%{http_code}' "$BASE$1"; }
 reader_sql() { psql_como shopbrasil_reader "$READER_PASSWORD" shopbrasil -c "$1"; }
 contagens() {
@@ -47,6 +50,7 @@ verificar "W1 contêiner recebe só a conta de leitura" "SHOPBRASIL_DB_READER_US
 
 # W2. Banco vazio: última data explícita como null.
 verificar "W2 última data sem publicação" '{"data":null}' "$(json /api/metricas/ultima-data)"
+verificar "P1 painel sem publicação" "||Nenhuma métrica publicada até o momento||null" "$(pagina)"
 
 admin_sql shopbrasil "$(cat "$ROOT/e2e/web/fixtures/snapshot.sql")" >"$LOG_DIR/fixture.log" 2>&1 \
   || { registrar FAIL "W3 fixture" "ver $LOG_DIR/fixture.log"; resumo; }
@@ -97,5 +101,16 @@ with RepositorioMetricasPostgres(configuracao_do_ambiente())._cursor() as cursor
     print("|".join(cursor.fetchone()))
 PY
 )"
+
+# P. Página do painel (#19): abre na última data, filtro por data, estado vazio, mesmos valores da API.
+verificar "P2 painel abre na data mais recente" \
+  "2026-11-24|2026-11-24||Joias/1234567890.12/0.10/9999999999.99/4|$(json '/api/metricas?data=2026-11-24')" "$(pagina)"
+verificar "P3 selecionar data carrega o dia" \
+  "2026-11-22|2026-11-22||Eletrônicos/10.00/10.00/10.01/3;Joias/10.01/10.00/10.01/2|$(json '/api/metricas?data=2026-11-22')" \
+  "$(pagina '?data=2026-11-22')"
+verificar "P4 data sem registros" \
+  '2026-11-21|2026-11-21|Sem métricas para esta data||{"data":"2026-11-21","vazia":true,"metricas":[]}' \
+  "$(pagina '?data=2026-11-21')"
+verificar "P5 data inválida na página" "422" "$(codigo_http '/?data=2026-02-30')"
 
 resumo
