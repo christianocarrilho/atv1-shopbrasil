@@ -304,6 +304,22 @@ Comando: `e2e/web/executar.sh`. Ele constrói a imagem `web/Dockerfile` (`python
 | Testes do pipeline e do lint | `python3 -m unittest discover -s pipeline/tests -t pipeline`; `python3 -m unittest discover -s qualidade/tests` | `Ran 51 tests ... OK`; `Ran 38 tests ... OK` |
 | Lint de arquitetura | `python3 qualidade/lint_arquitetura.py` | `OK: 35 arquivo(s) Python verificado(s), nenhuma violação de arquitetura.` |
 
+## #16 — Mapeamento por categoria, pool e consolidação
+
+Comando: `e2e/pipeline/executar.sh` (parte da suíte de 22 nov. 2026 registrada abaixo, sobre 5f589db). Valores observados:
+
+| Cenário | Critério da #16 | Resultado | Observado |
+|---|---|---|---|
+| M1 instâncias mapeadas e pool | fan-out por categoria | PASS | `4` instâncias, `map/region_index 0,1,2,3`, pool `ecommerce_pool` |
+| M2 concorrência | no máximo duas em paralelo | PASS | máximo de `2` simultâneas, com 3 s por instância |
+| M3 consolidação | um resultado por categoria | PASS | `4` itens: `electronics, jewelery, men's clothing, women's clothing`; `men's clothing` = `66.13` |
+| M3 XCom pequeno | payloads pequenos | PASS | máximo de `704` bytes (`buscar_produtos`); `calcular_metricas` 139, `consolidar` 555 |
+| M4 publicação pelo DAG | saída da #15 entregue à publicação | PASS | snapshot de 21/11 igual ao calculado à parte |
+| M5 categoria inédita | instância adicional sem editar o DAG | PASS | `5` instâncias, no máximo `2` simultâneas; `toys` cadastrada e publicada `67.76/15.50/120.01/2` |
+| M6 falhas preservam o publicado | — | PASS | runs recusadas sem snapshot; reprocessar com catálogo vazio mantém cadastro, snapshot e histórico (valores e `xmin`) |
+
+Na primeira execução completa, M1 e M3 falharam por consultar `map_index`, que no Airflow 3.4 é `region_index` (corrigido no PR #50).
+
 ## Validação final — suíte E2E completa (#23, #11)
 
 Executada em 22 nov. 2026, com Docker 29.9.2, Docker Compose v5.6.1 e Python 3.14.7 (macOS), sobre `main` d7cf1a1 (merge do PR #49) com as correções dos próprios testes descritas abaixo.
@@ -342,3 +358,47 @@ Sobre o ambiente do cenário integrado mantido com `E2E_MANTER=1`, com dados pub
 - Em 11/11, a tabela mostrou 5 categorias (com `toys`), e as barras mostraram os mesmos preços médios: `86.5, 695, 66.13, 67.76, 9.85`.
 - Ao trocar a data no campo para 09/11, a página recarregou com “Sem métricas para esta data” na tabela e nas barras, mantendo os filtros da evolução.
 - Linha de `jewelery` de 10 a 12/11: `695, 695, null`. Linha de `toys` de 09 a 13/11: `null, null, 67.76, null, null`, com `spanGaps: false`; o único ponto aparece isolado, sem ligação nem zero nos dias sem dados.
+
+## Revisão cruzada — #22
+
+Realizada em 22 nov. 2026 sobre `main` f0fc0b9, conforme a divisão do AGENTS.md. Os revisores trabalharam em modo só leitura.
+
+| Revisor | Frente revisada | Escopo | Veredito |
+|---|---|---|---|
+| Kiro (Claude Opus 5.5) | DAG e processamento | #6 (PR #42), #13 (PR #37), #14 (PR #39), #16 (PR #43) | Aprovado com recomendações, sem bloqueantes |
+| Claude Opus 5.5 | Ambiente e persistência | #18 (PR #40); #17 já revisada no PR #38 | Aprovado com uma observação |
+| Codex (GPT-6.2 Astra) | Revisão final integrada e Web/API | #9, #19–#21, #23, conjunto frente ao enunciado | Requisitos atendidos; dois bloqueantes de cobertura na #23 |
+
+Achados e tratamento, todos em `correcoes-revisao-cruzada`:
+
+| Origem | Achado | Severidade | Tratamento |
+|---|---|---|---|
+| Codex 1 | Suíte não executava os gráficos | Bloqueante (#23) | G1 (web) e N7 (integrado) operam o painel num Chromium real (Playwright 1.49.0): troca de data e filtros pelo formulário, valores entregues ao Chart.js iguais à tabela, lacunas `null`, console sem erros (5f589db) |
+| Codex 2 | Preservação conferida só por contagens | Bloqueante (#23) | V5, I4, M6 e N6 comparam cadastro, snapshot e histórico com valores e `xmin` antes e depois (5f589db) |
+| Codex 3 | N5 podia aprovar reprocessamento não ocorrido | Recomendação | N5 exige `tasks clear` bem-sucedido e nova tentativa de `publicacao.publicar` (5f589db) |
+| Codex 4 | `/?data=0001-01-01` gerava `OverflowError` | Recomendação | Início padrão limitado a `date.min`, com teste (0371ff1) |
+| Codex 5 | Guia consultava com a conta administrativa | Recomendação | Exemplos usam `shopbrasil_reader` (6f22bc2) |
+| Codex 6 | Datas antigas no README do E2E; PR #49 integrado antes da suíte | Observação | README corrigido (5f589db); desvio de processo registrado abaixo |
+| Kiro 1 | DAG chamava o domínio diretamente; lint permitia | Recomendação | Cálculo e tradução de XCom expostos na aplicação; lint proíbe `pipeline_dags → pipeline_dominio`, com teste do caso proibido (7d81c45) |
+| Kiro 2 | #16 sem evidências por cenário | Recomendação | Seção da #16 acima |
+| Kiro 3 | Tentativa após reprocessar não verificada | Observação | C6 confere `tentativa=1/4` no `attempt=2.log` (5f589db) |
+| Kiro 9 | READMEs do pipeline desatualizados | Observação | Atualizados (7d81c45) |
+| Kiro 4–8 | Arredondamento de mín/máx, constante HALF_UP, ganchos de teste por variável de ambiente, ramo não-`Mapping` do operador, código da categoria sem normalização | Observação | Mantidos: não contrariam o enunciado nem as issues; I1 confere os valores de produção sem os ganchos |
+| Claude | Reprocessar a mesma run com dados novos atualiza o snapshot, mas o histórico da run mantém os valores originais | Observação | Mantido: a especificação manda preservar as linhas existentes no reprocessamento da mesma run; demonstrado em H2 |
+
+**Desvio de processo:** o AGENTS.md pedia a suíte completa aprovada antes do merge em `main`. O PR #49 foi integrado com a validação pendente; a primeira execução falhou por defeitos dos testes, corrigidos no PR #50, e a revisão cruzada acima aconteceu depois do merge. O código de produção não teve defeito funcional apontado.
+
+## Validação final após a revisão cruzada
+
+Executada em 22 nov. 2026 sobre 5f589db (`correcoes-revisao-cruzada`), mesmo ambiente da validação anterior. Comando: `e2e/executar_todos.sh`. Código de saída 0. **244 verificações PASS, 0 FAIL.**
+
+| Cenário | Resultado | PASS | FAIL | Duração |
+|---|---|---|---|---|
+| ambiente | PASS | 29 | 0 | 60s |
+| esquema | PASS | 36 | 0 | 11s |
+| pipeline | PASS | 71 | 0 | 214s |
+| publicacao | PASS | 44 | 0 | 40s |
+| web | PASS | 35 | 0 | 16s |
+| integrado | PASS | 29 | 0 | 163s |
+
+Destaques: G1 `4.6.1|10.00,10.01|10,10.01@2|…|20,None,10,None@4|spanGaps=False|erros=0`; N7 `4.6.1|86.50,695.00,66.13,67.76,9.85|86.5,695,66.13,67.76,9.85@5|data=2026-11-09;Sem métricas para esta data;…|None,None,67.76,None,None@5|…|erros=0`; N5 `2:success` na nova tentativa da publicação. Lint de arquitetura `OK: 48 arquivo(s)`, testes do lint (39), do pipeline e da web (48) aprovados.
