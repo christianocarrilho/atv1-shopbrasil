@@ -4,7 +4,8 @@
 # Ambiente Docker da ShopBrasil: PostgreSQL 18.7, inicialização do banco (db-init) e Airflow 3.4.0
 # com LocalExecutor, Connection shopbrasil_postgres e pool ecommerce_pool de dois slots.
 # O LocalExecutor dispensa Redis e workers Celery, suficientes para um DAG diário em uma máquina.
-# A Web/API (#9) entra como serviço próprio que depende do db-init e usa apenas a conta de leitura.
+# A Web/API (#9) é um serviço próprio (web) que depende do db-init e usa apenas a conta de leitura.
+# O Airflow não depende dela; `docker compose up -d` sobe os dois módulos.
 
 x-airflow-common: &airflow-common
   image: apache/airflow:3.4.0-python3.12
@@ -148,6 +149,26 @@ services:
       <<: *airflow-common-depends-on
       airflow-init:
         condition: service_completed_successfully
+
+  # Web/API (#9): só a conta de leitura entra no contêiner; a de escrita fica no Airflow.
+  web:
+    build:
+      context: ./web
+    image: shopbrasil-web:local
+    environment:
+      SHOPBRASIL_DB_HOST: ${SHOPBRASIL_DB_HOST:?defina SHOPBRASIL_DB_HOST no .env}
+      SHOPBRASIL_DB_PORT: ${SHOPBRASIL_DB_PORT:?defina SHOPBRASIL_DB_PORT no .env}
+      SHOPBRASIL_DB_NAME: ${SHOPBRASIL_DB_NAME:?defina SHOPBRASIL_DB_NAME no .env}
+      SHOPBRASIL_DB_READER_USER: ${SHOPBRASIL_DB_READER_USER:?defina SHOPBRASIL_DB_READER_USER no .env}
+      SHOPBRASIL_DB_READER_PASSWORD: ${SHOPBRASIL_DB_READER_PASSWORD:?defina SHOPBRASIL_DB_READER_PASSWORD no .env}
+    ports:
+      - "127.0.0.1:${SHOPBRASIL_WEB_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
 
 volumes:
   postgres-data:
