@@ -36,8 +36,9 @@ subir_airflow "P0 subida do Airflow"
 if aguardar_dag "$DAG_ID"; then registrar PASS "P1 DAG registrado" "$DAG_ID"; else registrar FAIL "P1 DAG registrado" "ausente"; resumo; fi
 verificar "P1 erros de importação" "0" "$(admin_sql airflow "SELECT count(*) FROM import_error")"
 
-# P2. Estrutura: TaskGroups e dependências criadas pelas chamadas TaskFlow.
-estrutura="$(dc exec -T airflow-scheduler python - <<'PY' 2>/dev/null | sed -n 's/^RESULTADO=//p' | tail -1
+# P2. Estrutura: TaskGroups e dependências criadas pelas chamadas TaskFlow. As consultas ad hoc ao
+# DagBag usam o mesmo PYTHONPATH dos processos do Airflow, que incluem a pasta de DAGs (operadores/).
+estrutura="$(dc exec -T -e PYTHONPATH=/opt/airflow/pipeline:/opt/airflow/dags airflow-scheduler python - <<'PY' 2>/dev/null | sed -n 's/^RESULTADO=//p' | tail -1
 from airflow.dag_processing.dagbag import DagBag
 dag = DagBag("/opt/airflow/dags").dags["shopbrasil_metricas"]
 grupos = sorted(k for k, v in dag.task_group.children.items() if hasattr(v, "children"))
@@ -52,7 +53,7 @@ verificar "P2 TaskGroups e dependências" \
 # P3. Agenda: cron das 06:00 em Brasília, start_date com pendulum e catchup=False.
 verificar "P3 agenda registrada" "0 6 * * *|America/Sao_Paulo" \
   "$(admin_sql airflow "SELECT timetable_summary || '|' || (SELECT data::json->'dag'->'timetable'->'__var'->>'timezone' FROM serialized_dag WHERE dag_id = '$DAG_ID' ORDER BY created_at DESC LIMIT 1) FROM dag WHERE dag_id = '$DAG_ID'" 2>/dev/null)"
-config_dag="$(dc exec -T airflow-scheduler python - <<'PY' 2>/dev/null | sed -n 's/^RESULTADO=//p' | tail -1
+config_dag="$(dc exec -T -e PYTHONPATH=/opt/airflow/pipeline:/opt/airflow/dags airflow-scheduler python - <<'PY' 2>/dev/null | sed -n 's/^RESULTADO=//p' | tail -1
 from airflow.dag_processing.dagbag import DagBag
 dag = DagBag("/opt/airflow/dags").dags["shopbrasil_metricas"]
 print(f"RESULTADO={dag.start_date.isoformat()}|{dag.timezone.name}|catchup={dag.catchup}")
@@ -114,7 +115,7 @@ FROM task_instance WHERE dag_id = '$DAG_ID' AND run_id = '$RUN_ID'")"
 # P6. Run sem data lógica é rejeitada em vez de usar o relógio. A CLI e a UI sempre preenchem a
 # data lógica, então o cenário usa trigger_dag do Airflow 3.4.0 (API interna, fixada pela #1).
 SEM_DATA="e2e__sem_data_logica"
-dc exec -T airflow-scheduler python - "$SEM_DATA" <<'PY' >"$LOG_DIR/sem-data.log" 2>&1
+dc exec -T -e PYTHONPATH=/opt/airflow/pipeline:/opt/airflow/dags airflow-scheduler python - "$SEM_DATA" <<'PY' >"$LOG_DIR/sem-data.log" 2>&1
 import sys
 from airflow.api.common.trigger_dag import trigger_dag
 from airflow.utils.types import DagRunTriggeredByType
@@ -157,7 +158,7 @@ xcom_catalogo() {
 }
 
 # I1. Configuração de produção, lida sem a variável de atraso reduzido do override E2E.
-config_busca="$(dc exec -T airflow-scheduler env -u SHOPBRASIL_BUSCA_RETRY_DELAY_SEGUNDOS python -c '
+config_busca="$(dc exec -T -e PYTHONPATH=/opt/airflow/pipeline:/opt/airflow/dags airflow-scheduler env -u SHOPBRASIL_BUSCA_RETRY_DELAY_SEGUNDOS python -c '
 from airflow.dag_processing.dagbag import DagBag
 from shopbrasil_pipeline.composicao import fonte_catalogo
 t = DagBag("/opt/airflow/dags").dags["shopbrasil_metricas"].get_task("ingestao.buscar_produtos")
