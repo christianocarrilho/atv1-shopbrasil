@@ -25,6 +25,13 @@ from airflow.exceptions import AirflowFailException
 from airflow.sdk import CronTriggerTimetable, dag, get_current_context, task, task_group
 
 from shopbrasil_pipeline import composicao
+from shopbrasil_pipeline.aplicacao.alertas import (
+    OcorrenciaTask,
+    notificar_falha,
+    notificar_falha_ingestao,
+    notificar_retry,
+    notificar_sucesso,
+)
 from shopbrasil_pipeline.aplicacao.catalogo import coletar_catalogo
 from shopbrasil_pipeline.aplicacao.execucao import identificar_execucao
 from shopbrasil_pipeline.dominio.calendario import FUSO_REFERENCIA
@@ -49,12 +56,45 @@ BUSCA_RETRY_DELAY = timedelta(seconds=int(os.environ.get("SHOPBRASIL_BUSCA_RETRY
 log = logging.getLogger(__name__)
 
 
+def _ocorrencia(contexto) -> OcorrenciaTask:
+    """Traduz o contexto do callback do Airflow para a ocorrência da aplicação."""
+    ti = contexto["ti"]
+    erro = contexto.get("exception")
+    return OcorrenciaTask(
+        dag_id=ti.dag_id,
+        run_id=ti.run_id,
+        task_id=ti.task_id,
+        tentativa=ti.try_number,
+        max_tentativas=contexto["task"].retries + 1,
+        erro=f"{type(erro).__name__}: {erro}" if erro else None,
+    )
+
+
+# Callbacks: o Airflow chama estas funções no processo da task, e as mensagens vão para o log
+# daquela tentativa. Qualquer task que falhe emite o aviso; a ingestão também simula o alerta.
+def avisar_falha(contexto) -> None:
+    notificar_falha(composicao.notificador(), _ocorrencia(contexto))
+
+
+def busca_sucesso(contexto) -> None:
+    notificar_sucesso(composicao.notificador(), _ocorrencia(contexto))
+
+
+def busca_retry(contexto) -> None:
+    notificar_retry(composicao.notificador(), _ocorrencia(contexto))
+
+
+def busca_falha(contexto) -> None:
+    notificar_falha_ingestao(composicao.notificador(), _ocorrencia(contexto))
+
+
 @dag(
     dag_id=DAG_ID,
     schedule=CronTriggerTimetable(AGENDA_CRON, timezone=FUSO),
     start_date=START_DATE,
     catchup=False,
     max_active_runs=1,
+    default_args={"on_failure_callback": avisar_falha},
     tags=["shopbrasil", "fakestore"],
     doc_md=__doc__,
 )
@@ -75,6 +115,9 @@ def shopbrasil_metricas():
             retries=BUSCA_RETRIES,
             retry_delay=BUSCA_RETRY_DELAY,
             retry_exponential_backoff=BUSCA_BACKOFF,
+            on_success_callback=busca_sucesso,
+            on_retry_callback=busca_retry,
+            on_failure_callback=busca_falha,
         )
         def buscar_produtos(execucao: dict[str, str]) -> dict[str, object]:
             # A #6 acrescenta a validação depois desta task.
