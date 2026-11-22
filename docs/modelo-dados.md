@@ -24,7 +24,7 @@ O `db-init` aplica o arquivo no banco `shopbrasil`, esquema `public`, com a cont
 |---|---|---|
 | `id` | `integer GENERATED ALWAYS AS IDENTITY` | PK `categoria_pk`. O banco gera o valor e recusa id informado. |
 | `codigo` | `text NOT NULL` | `UNIQUE` `categoria_codigo_uk`; não pode ser vazio (`categoria_codigo_preenchido_ck`). Valor de `category` da FakeStore. |
-| `descricao` | `text NOT NULL` | Texto exibido. |
+| `descricao` | `text NOT NULL` | Texto exibido. A FakeStore só informa `category`, então o cadastro automático da #17 grava o próprio código como descrição. |
 
 O cadastro de categoria nova usa `INSERT ... ON CONFLICT (codigo) DO NOTHING`. Categorias nunca são removidas pelo pipeline, e as FKs usam `ON DELETE RESTRICT`.
 
@@ -48,7 +48,7 @@ Unicidade `metricas_categoria_data_categoria_uk` em `(data_referencia, categoria
 |---|---|---|
 | `run_id` | `text NOT NULL` | `run_id` do DAG run do Airflow; não pode ser vazio. |
 | `categoria_id` | `integer NOT NULL` | FK `metricas_categoria_historico_categoria_fk` para `categoria(id)`, `ON DELETE RESTRICT`. |
-| `data_execucao` | `date NOT NULL` | Data de referência da run, a mesma de `metricas_categoria.data_referencia` na publicação. O reprocessamento preserva o valor. |
+| `data_execucao` | `date NOT NULL` | Data de referência da run, a mesma de `metricas_categoria.data_referencia` na publicação. Segue o sentido de data lógica da run no Airflow, e não o instante em que a task rodou, para que o reprocessamento preserve o valor. |
 | `preco_medio`, `preco_minimo`, `preco_maximo` | `numeric(12,2) NOT NULL` | |
 | `quantidade_produtos` | `integer NOT NULL` | |
 
@@ -73,7 +73,7 @@ A saída consolidada de cada categoria leva o código da categoria e as quatro m
 | preço máximo | `preco_maximo` | `numeric(12,2)` | idem |
 | quantidade | `quantidade_produtos` | `integer` | inteiro |
 
-- **Precisão.** `numeric(12,2)` aceita de `0.00` a `9999999999.99` nas colunas de preço, pela restrição de mínimo não negativo. Um valor com mais de dez dígitos inteiros falha com `numeric field overflow` e desfaz a publicação.
+- **Precisão.** `numeric(12,2)` aceita de `0.00` a `9999999999.99` nas colunas de preço, pela restrição de mínimo não negativo. Um valor com mais de dez dígitos inteiros falha com `numeric field overflow` e desfaz a publicação. A #6 rejeita preço negativo antes do cálculo, e a restrição do banco fica como última barreira.
 - **Escala.** O tipo arredonda valores com mais de duas casas, com empate para longe do zero (`10.005` vira `10.01`). Para que o banco grave exatamente o valor calculado, a #15 deve entregar os quatro preços já quantizados em duas casas, e a média arredondada uma única vez no domínio. O modo de arredondamento da média é decisão da #15.
 - **Leitura.** O PostgreSQL devolve `numeric`. O `psycopg2` do `PostgresHook` e o `psycopg` da web convertem esse valor em `Decimal`, então snapshot, histórico e painel mostram o mesmo valor publicado.
 - **Datas.** `data_referencia` e `data_execucao` são `date`. O transporte pode usar ISO 8601 (`"2026-11-22"`).
