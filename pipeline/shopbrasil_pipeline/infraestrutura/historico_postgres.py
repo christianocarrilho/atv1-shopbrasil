@@ -8,14 +8,18 @@ Implementa ``EtapaTransacional`` do adaptador da #17: com o cursor da transaçã
 ``metricas_categoria_historico`` as quatro métricas de cada categoria publicada, com o ``run_id``
 da execução e ``data_execucao`` igual à data de referência. ``ON CONFLICT (run_id, categoria_id)
 DO NOTHING`` faz o append: uma run distinta acrescenta linhas e o reprocessamento da mesma run
-mantém as já registradas, sem atualizá-las. A etapa não faz commit nem rollback; uma exceção do
-banco desfaz cadastro e snapshot junto com o histórico.
+mantém as já registradas, sem atualizá-las, como manda a especificação. Se o reprocessamento
+publicar valores diferentes dos já registrados para a run, a etapa relê as linhas da run e emite um
+aviso ``[SHOPBRASIL][AVISO] histórico preservado diverge do snapshot`` por categoria, para que a
+diferença entre snapshot e histórico nunca passe em silêncio. A etapa não faz commit nem rollback;
+uma exceção do banco desfaz cadastro e snapshot junto com o histórico.
 O módulo não importa o provider do Airflow para que os testes unitários rodem só com a
 biblioteca padrão; o tipo do snapshot vem do adaptador apenas na checagem estática.
 """
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -28,11 +32,28 @@ VALUES (%s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT (run_id, categoria_id) DO NOTHING
 """
 
+_SQL_LER_HISTORICO_DA_RUN = """
+SELECT categoria_id, preco_medio, preco_minimo, preco_maximo, quantidade_produtos
+  FROM public.metricas_categoria_historico
+ WHERE run_id = %s AND categoria_id = ANY(%s)
+"""
+
+AVISO_DIVERGENCIA = (
+    "[SHOPBRASIL][AVISO] histórico preservado diverge do snapshot: run=%s categoria=%s "
+    "histórico=%s snapshot=%s (reprocessamento da mesma run mantém a linha original)"
+)
+
+log = logging.getLogger(__name__)
+
+
+def _metricas(linha: tuple) -> str:
+    return "/".join(str(v) for v in linha)
+
 
 class RegistrarHistoricoPostgres:
     """Etapa adicional da publicação: append do histórico por ``(run_id, categoria_id)``."""
 
-    def __call__(self, cursor: Any, snapshot: SnapshotNaTransacao) -> None:
+    def __call__(self, cursor: Any, snapshot: SnapshotNaTransacao) -> list[str]:
         execucao = snapshot.execucao
         # Os mesmos objetos Decimal do snapshot vão ao driver, por isso os valores coincidem.
         cursor.executemany(
@@ -50,3 +71,21 @@ class RegistrarHistoricoPostgres:
                 for m in snapshot.metricas
             ],
         )
+        return self._avisar_divergencias(cursor, snapshot)
+
+    @staticmethod
+    def _avisar_divergencias(cursor: Any, snapshot: SnapshotNaTransacao) -> list[str]:
+        """Compara o histórico da run com o snapshot recém-gravado e avisa cada categoria diferente."""
+        execucao = snapshot.execucao
+        publicados = {
+            snapshot.categoria_ids[m.codigo_categoria]: (m.codigo_categoria, (m.preco_medio, m.preco_minimo, m.preco_maximo, m.quantidade_produtos))
+            for m in snapshot.metricas
+        }
+        cursor.execute(_SQL_LER_HISTORICO_DA_RUN, (execucao.run_id, list(publicados)))
+        divergentes = []
+        for categoria_id, *registrado in cursor.fetchall():
+            codigo, publicado = publicados[categoria_id]
+            if tuple(registrado) != publicado:
+                log.warning(AVISO_DIVERGENCIA, execucao.run_id, codigo, _metricas(tuple(registrado)), _metricas(publicado))
+                divergentes.append(codigo)
+        return sorted(divergentes)

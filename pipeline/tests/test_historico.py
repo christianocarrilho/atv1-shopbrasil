@@ -49,8 +49,9 @@ class SnapshotFalso:
 
 
 class CursorFalso:
-    def __init__(self, falhar_em: str | None = None) -> None:
+    def __init__(self, falhar_em: str | None = None, historico_da_run: list[tuple] | None = None) -> None:
         self.comandos: list[tuple[str, object]] = []
+        self.historico_da_run = historico_da_run or []
         self._falhar_em = falhar_em
         self._resultado: list[tuple] = []
 
@@ -71,6 +72,8 @@ class CursorFalso:
             self._resultado = [(c,) for c in parametros[0]]
         elif "SELECT codigo, id" in sql:
             self._resultado = [(c, i) for i, c in enumerate(parametros[0], start=1)]
+        elif "FROM public.metricas_categoria_historico" in sql:
+            self._resultado = list(self.historico_da_run)
 
     def executemany(self, sql, linhas):
         self._registrar(sql, list(linhas))
@@ -105,7 +108,7 @@ class RegistrarHistoricoTest(unittest.TestCase):
     def test_insere_uma_linha_por_categoria_com_run_e_data_de_referencia(self):
         cursor = CursorFalso()
         RegistrarHistoricoPostgres()(cursor, SnapshotFalso(EXECUCAO, METRICAS, {"electronics": 7, "jewelery": 9}))
-        self.assertEqual(len(cursor.comandos), 1)
+        self.assertEqual(len(cursor.comandos), 2)
         sql, linhas = cursor.comandos[0]
         self.assertIn("INSERT INTO public.metricas_categoria_historico", sql)
         self.assertIn("ON CONFLICT (run_id, categoria_id) DO NOTHING", sql)
@@ -131,6 +134,25 @@ class RegistrarHistoricoTest(unittest.TestCase):
         texto = " ".join(sql for sql, _ in cursor.comandos).upper()
         for palavra in ("COMMIT", "ROLLBACK", "BEGIN"):
             self.assertNotIn(palavra, texto)
+
+    def test_reprocessamento_sem_mudanca_nao_avisa(self):
+        iguais = [(7, Decimal("10.00"), Decimal("10.00"), Decimal("10.01"), 3),
+                  (9, Decimal("10.01"), Decimal("10.00"), Decimal("10.01"), 2)]
+        cursor = CursorFalso(historico_da_run=iguais)
+        with self.assertNoLogs("shopbrasil_pipeline.infraestrutura.historico_postgres", "WARNING"):
+            divergentes = RegistrarHistoricoPostgres()(cursor, SnapshotFalso(EXECUCAO, METRICAS, {"electronics": 7, "jewelery": 9}))
+        self.assertEqual([], divergentes)
+
+    def test_reprocessamento_com_valores_novos_preserva_e_avisa(self):
+        antigos = [(7, Decimal("20.00"), Decimal("15.00"), Decimal("25.00"), 2),
+                   (9, Decimal("10.01"), Decimal("10.00"), Decimal("10.01"), 2)]
+        cursor = CursorFalso(historico_da_run=antigos)
+        with self.assertLogs("shopbrasil_pipeline.infraestrutura.historico_postgres", "WARNING") as logs:
+            divergentes = RegistrarHistoricoPostgres()(cursor, SnapshotFalso(EXECUCAO, METRICAS, {"electronics": 7, "jewelery": 9}))
+        self.assertEqual(["electronics"], divergentes)
+        self.assertIn("categoria=electronics histórico=20.00/15.00/25.00/2 snapshot=10.00/10.00/10.01/3", logs.output[0])
+        # A linha original não é atualizada: o INSERT segue com DO NOTHING.
+        self.assertNotIn("DO UPDATE", cursor.comandos[0][0])
 
 
 class PublicacaoComHistoricoTest(unittest.TestCase):
@@ -167,6 +189,7 @@ class PublicacaoComHistoricoTest(unittest.TestCase):
                 "DELETE public.metricas_categoria",
                 "INSERT public.metricas_categoria",
                 "INSERT public.metricas_categoria_historico",
+                "SELECT preco_medio,",  # leitura do histórico da run para o aviso de divergência
             ],
         )
         self.assertFalse(conexao.autocommit)

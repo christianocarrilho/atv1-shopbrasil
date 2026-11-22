@@ -124,7 +124,7 @@ HIST_FIS_H1="$(historico_fisico)"
 # U5. Republicação da mesma data (reprocessamento da mesma run): jewelery fica fora do dia,
 # women's clothing entra e electronics é substituída.
 M1B="$(lista "$(m electronics 12.00 11.00 13.00 4)" "$(m "women's clothing" 50.50 40.00 61.00 3)")"
-saida="$(publicar publicar "$R1" "$D1" "$M1B")"
+saida="$(dc exec -T airflow-scheduler python - publicar "$R1" "$D1" "$M1B" <"$FIXTURE" 2>"$LOG_DIR/u5.err" | tail -1)"
 verificar "U5 republicação cadastra só a categoria nova" "women's clothing" "$(campo categorias_cadastradas <<<"$saida")"
 verificar "U5 snapshot de $D1 substituído" "electronics=12.00/11.00/13.00/4 women's clothing=50.50/40.00/61.00/3" "$(snapshot "$D1")"
 verificar "U5 categoria ausente preservada no cadastro" "electronics men's clothing jewelery women's clothing" \
@@ -148,6 +148,10 @@ verificar "H2 linhas originais intactas (chave e xmin)" "$HIST_FIS_H1" \
     FROM metricas_categoria_historico h WHERE NOT EXISTS (SELECT 1 FROM categoria c WHERE c.id = h.categoria_id AND c.codigo = 'women''s clothing')")"
 verificar "H2 histórico sem duplicatas: 5 linhas, máximo 1 por run+categoria" "5|1" \
   "$(reader_sql "SELECT count(*) FROM metricas_categoria_historico")|$(max_hist_por_chave)"
+# H2. A divergência entre o histórico preservado e o snapshot novo não passa em silêncio: um aviso
+# para electronics (valores mudaram) e nenhum para women's clothing (chave nova, gravada igual).
+verificar "H2 aviso de divergência só para a categoria alterada" "1|0" \
+  "$(grep -cF "histórico preservado diverge do snapshot: run=$R1 categoria=electronics histórico=10.00/10.00/10.01/3 snapshot=12.00/11.00/13.00/4" "$LOG_DIR/u5.err")|$(grep -cF "categoria=women's clothing" "$LOG_DIR/u5.err")"
 HIST_TODOS="$(historico_todos)"
 HIST_FIS="$(historico_fisico)"
 

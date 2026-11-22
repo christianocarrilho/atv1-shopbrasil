@@ -27,7 +27,7 @@ Interface entregue à #6 (XCom de `buscar_produtos`), uma projeção pequena que
  "produtos": [{"id": "5", "categoria": "jewelery", "tipo_categoria": "string", "preco": "695", "tipo_preco": "number"}]}
 ```
 
-`categoria` só é preenchida quando o valor é texto, e `preco` só quando é número, como string decimal sem arredondamento. Nos demais casos o campo fica `null`, e `tipo_categoria` ou `tipo_preco` informa o tipo JSON recebido (`boolean`, `string`, `null`, `array`, `object` ou `ausente`). `tipo_raiz` diferente de `array` indica uma resposta que não é lista. Com isso, a #6 rejeita catálogo vazio, categoria em branco, booleano e texto no lugar do preço. `NaN` e `Infinity` chegam com `tipo_preco` `number` e `preco` `"NaN"` ou `"Infinity"`, então a #6 também confere se o preço é finito, e o preço chega à #15 sem passar por float.
+`categoria` só é preenchida quando o valor é texto, e `preco` só quando é número, como string decimal sem arredondamento. Nos demais casos o campo fica `null`, e `tipo_categoria` ou `tipo_preco` informa o tipo JSON recebido (`boolean`, `string`, `null`, `array`, `object` ou `ausente`). `tipo_raiz` diferente de `array` indica uma resposta que não é lista. Com isso, a #6 rejeita catálogo vazio, categoria em branco ou com espaços nas extremidades, booleano e texto no lugar do preço, e preço com mais de duas casas ou acima do limite de `numeric(12,2)`, a escala em que o preço é gravado. `NaN` e `Infinity` chegam com `tipo_preco` `number` e `preco` `"NaN"` ou `"Infinity"`, então a #6 também confere se o preço é finito, e o preço chega à #15 sem passar por float. A #15 arredonda só a média, uma vez, com `MODO_ARREDONDAMENTO` (`ROUND_HALF_UP`); mínimo e máximo são preços observados e não são arredondados.
 
 ## Publicação
 
