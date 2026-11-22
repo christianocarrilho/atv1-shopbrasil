@@ -1,4 +1,4 @@
-"""Testes da página do painel (#19).
+"""Testes da página do painel (#19) e das barras de preço médio (#20).
 
 Autor: Christiano Henrique Carrilho Lopes da Silva
 Código de pessoa: 1691353
@@ -27,8 +27,15 @@ TEM_DEPENDENCIAS = all(importlib.util.find_spec(m) is not None for m in ("fastap
 def obter(aplicacao, caminho: str, **query: str) -> tuple[int, str, str]:
     """GET na aplicação ASGI; devolve status, content-type e corpo em texto."""
     mensagens: list[dict] = []
+    pedido_entregue = False
 
     async def receive() -> dict:
+        # Depois do corpo, fica aguardando como um cliente conectado: respostas de arquivo do
+        # Starlette escutam a desconexão, e repetir o pedido criaria um laço sem fim.
+        nonlocal pedido_entregue
+        if pedido_entregue:
+            await asyncio.Event().wait()
+        pedido_entregue = True
         return {"type": "http.request", "body": b"", "more_body": False}
 
     async def send(mensagem: dict) -> None:
@@ -125,6 +132,30 @@ class PaginaTest(unittest.TestCase):
 
         _, esquema = chamar(self.app, "/openapi.json")
         self.assertNotIn("/", esquema["paths"])
+
+
+    def test_barras_usam_a_colecao_da_tabela(self) -> None:
+        _, _, pagina = obter(self.app, "/", data="2026-11-22")
+        self.assertIn('<canvas id="grafico-barras"', pagina)
+        self.assertIn('<script src="/estaticos/chart.umd.min.js"></script>', pagina)
+        dados = dados_embutidos(pagina)
+        # Cada barra vem de uma linha da coleção; o preço médio é o mesmo exibido na tabela.
+        self.assertEqual(
+            [linha[1] for linha in linhas_da_tabela(pagina)],
+            [m["preco_medio"] for m in dados["metricas"]],
+        )
+        self.assertNotIn('id="barras-vazio"', pagina)
+
+    def test_barras_em_dia_sem_metricas_exibem_estado_vazio(self) -> None:
+        _, _, pagina = obter(self.app, "/", data="2026-11-21")
+        self.assertNotIn('<canvas id="grafico-barras"', pagina)
+        self.assertIn('<p class="vazio" id="barras-vazio">Sem métricas para esta data</p>', pagina)
+
+    def test_chartjs_servido_localmente(self) -> None:
+        status, tipo, corpo = obter(self.app, "/estaticos/chart.umd.min.js")
+        self.assertEqual(200, status)
+        self.assertIn("javascript", tipo)
+        self.assertIn("Chart.js v4.6.1", corpo[:200])
 
 
 if __name__ == "__main__":

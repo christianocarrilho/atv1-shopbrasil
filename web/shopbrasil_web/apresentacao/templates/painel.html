@@ -1,5 +1,5 @@
 {#- Autor: Christiano Henrique Carrilho Lopes da Silva | Código de pessoa: 1691353 | Matrícula: 262987
-    Painel de métricas da ShopBrasil (#19). As #20 e #21 acrescentam os gráficos nesta mesma tela. -#}
+    Painel de métricas da ShopBrasil (#19), com barras do preço médio (#20). A #21 acrescenta a linha nesta mesma tela. -#}
 <!doctype html>
 <html lang="pt-BR">
 <head>
@@ -14,6 +14,7 @@
     table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
     th, td { border-bottom: 1px solid #d0d7de; padding: 6px 8px; text-align: left; }
     td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .grafico { position: relative; height: 320px; margin-top: 1rem; }
     .vazio { margin-top: 1rem; padding: 12px; background: #f6f8fa; border: 1px solid #d0d7de; }
   </style>
 </head>
@@ -60,13 +61,50 @@
     {% endif %}
   </section>
 
+  {#- Barras do preço médio por categoria (#20), da mesma coleção da tabela. #}
+  <section id="barras">
+    <h2>Preço médio por categoria</h2>
+    {% if metricas is none or metricas.vazia %}
+      <p class="vazio" id="barras-vazio">{{ sem_metricas if metricas is not none else sem_publicacao }}</p>
+    {% else %}
+      <div class="grafico"><canvas id="grafico-barras" aria-label="Preço médio por categoria"></canvas></div>
+    {% endif %}
+  </section>
+
   {#- Coleção diária carregada, reutilizada pelas barras da #20 sem nova consulta. #}
   <script type="application/json" id="metricas-dados">{{ metricas_json | tojson }}</script>
 
   {#- Ponto de inserção da linha de evolução (#21). #}
   <section id="evolucao"></section>
 
+  <script src="/estaticos/chart.umd.min.js"></script>
   <script>
+    // Barras (#20): uma por linha da tabela, com o mesmo preço médio publicado.
+    (function () {
+      const canvas = document.getElementById("grafico-barras");
+      const dados = JSON.parse(document.getElementById("metricas-dados").textContent);
+      if (!canvas || !dados || dados.vazia) return;
+      new Chart(canvas, {
+        type: "bar",
+        data: {
+          labels: dados.metricas.map(m => m.categoria.descricao),
+          datasets: [{
+            label: "Preço médio",
+            data: dados.metricas.map(m => Number(m.preco_medio)),
+            backgroundColor: "#0969da"
+          }]
+        },
+        options: {
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: { label: ctx => "Preço médio: " + dados.metricas[ctx.dataIndex].preco_medio } }
+          },
+          scales: { y: { beginAtZero: true } }
+        }
+      });
+    })();
+
     // Selecionar uma data carrega as métricas daquele dia.
     document.getElementById("data").addEventListener("change", function () {
       if (this.value) this.form.submit();

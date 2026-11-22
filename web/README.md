@@ -79,13 +79,15 @@ Série do preço médio da categoria no intervalo **inclusivo** `[inicio, fim]`,
 | `400` | `inicio` depois de `fim` ou intervalo maior que 366 dias | `{"detail": "intervalo inválido: início 2026-11-24 depois do fim 2026-11-20"}` |
 | `404` | Categoria não cadastrada em `/api/evolucao` | `{"detail": "categoria 'toys' não cadastrada"}` |
 
-## Painel — #19
+## Painel — #19 e #20
 
 `GET /` renderiza o painel no servidor com Jinja2, usando os mesmos casos de uso e modelos HTTP da API.
 
 - Sem `data`, abre na data mais recente com métricas (`ultima-data`). Selecionar outra data no campo recarrega a página com `?data=AAAA-MM-DD`.
 - A tabela mostra categoria, preço médio, mínimo, máximo e quantidade de produtos, com os mesmos valores do JSON. Data sem registros exibe “Sem métricas para esta data”; sem nenhuma publicação, “Nenhuma métrica publicada até o momento”.
 - A coleção carregada fica embutida como JSON em `<script type="application/json" id="metricas-dados">`, igual a `/api/metricas?data=…`, para as barras da #20. A seção `#evolucao` é o ponto de inserção da linha da #21.
+- Barras do preço médio por categoria (#20): o Chart.js lê a mesma coleção embutida, uma barra por linha da tabela, e o rótulo mostra a string publicada (`"10.01"`); só a altura usa `Number`. Data sem métricas exibe o estado vazio no lugar do gráfico.
+- O Chart.js 4.6.1 (MIT) fica em [estaticos/chart.umd.min.js](shopbrasil_web/apresentacao/estaticos/chart.umd.min.js), servido em `/estaticos/`, sem CDN (decisão da #1). SHA-256 do arquivo: `87364cc2b2a76a6684929e7d6b80b18a897794db38400caff1fcf1791c6925d2`.
 - Data inválida responde `422`, como na API. A página fica fora do OpenAPI.
 
 ## Configuração e execução
