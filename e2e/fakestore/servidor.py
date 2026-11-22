@@ -6,6 +6,7 @@ Matrícula: 262987
 
 Responde ``GET /products`` no limite HTTP da FakeStore real, consumindo uma fila de respostas
 programada pelo cenário em ``POST /_controle``. Com a fila vazia, devolve o catálogo ``padrao``.
+Como a API real, responde 403 ao User-Agent padrão ``Python-urllib``.
 ``GET /_controle`` informa os instantes das requisições recebidas, usados para conferir o backoff.
 Usa só a biblioteca padrão e roda na imagem do Airflow já baixada pelo ambiente.
 
@@ -44,6 +45,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path.rstrip("/") != "/products":
             self._responder(404, b'{"erro": "rota desconhecida"}')
+            return
+        if self.headers.get("User-Agent", "").startswith("Python-urllib"):
+            self._responder(403, b'{"erro": "user-agent recusado"}')
             return
         with trava:
             estado["requisicoes"].append(time.time())

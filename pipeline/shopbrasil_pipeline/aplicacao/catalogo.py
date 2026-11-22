@@ -18,9 +18,6 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Protocol
 
-TIPOS_JSON = ("number", "string", "boolean", "null", "array", "object", "ausente")
-
-
 @dataclass(frozen=True)
 class ProdutoColetado:
     """Projeção de um produto com o tipo JSON original da categoria e do preço.

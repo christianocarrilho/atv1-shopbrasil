@@ -9,6 +9,8 @@ com ``parse_float`` e ``parse_int`` em ``Decimal``, porque o catálogo mistura p
 fracionários e nenhum deles pode passar por float. Usa ``urllib`` da biblioteca padrão para não
 acrescentar dependência ao Airflow. Não trata erros: HTTP, conexão, timeout e JSON inválido são
 propagados para que a retentativa da task os trate.
+
+Envia um ``User-Agent`` próprio: a FakeStore real responde 403 ao ``Python-urllib/3.x`` padrão.
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ from decimal import Decimal
 
 TIMEOUT_SEGUNDOS = 15
 ROTA_PRODUTOS = "/products"
+USER_AGENT = "shopbrasil-pipeline/1.0"
 
 
 class FakeStoreHttp:
@@ -31,7 +34,7 @@ class FakeStoreHttp:
         self.timeout = timeout
 
     def buscar_produtos(self) -> object:
-        requisicao = urllib.request.Request(self.url, headers={"Accept": "application/json"})
+        requisicao = urllib.request.Request(self.url, headers={"Accept": "application/json", "User-Agent": USER_AGENT})
         # urlopen levanta HTTPError para status 4xx/5xx e URLError/TimeoutError para rede.
         with urllib.request.urlopen(requisicao, timeout=self.timeout) as resposta:
             corpo = resposta.read()

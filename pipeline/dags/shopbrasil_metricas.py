@@ -21,6 +21,7 @@ import os
 from datetime import timedelta
 
 import pendulum
+from airflow.exceptions import AirflowFailException
 from airflow.sdk import CronTriggerTimetable, dag, get_current_context, task, task_group
 
 from shopbrasil_pipeline import composicao
@@ -40,6 +41,9 @@ START_DATE = pendulum.datetime(2026, 11, 1, tz=FUSO)
 # backoff exponencial. O atraso pode ser reduzido pelo ambiente apenas nos testes E2E, para não
 # esperar minutos por retentativa; o valor de produção é 60 segundos.
 BUSCA_RETRIES = 3
+# Multiplicador do backoff: no Airflow 3.4 o parâmetro é float, e cada espera é sorteada entre N e
+# 2N, com N = atraso inicial × 2^(n−1).
+BUSCA_BACKOFF = 2.0
 BUSCA_RETRY_DELAY = timedelta(seconds=int(os.environ.get("SHOPBRASIL_BUSCA_RETRY_DELAY_SEGUNDOS", "60")))
 
 log = logging.getLogger(__name__)
@@ -70,12 +74,17 @@ def shopbrasil_metricas():
         @task(
             retries=BUSCA_RETRIES,
             retry_delay=BUSCA_RETRY_DELAY,
-            retry_exponential_backoff=True,
+            retry_exponential_backoff=BUSCA_BACKOFF,
         )
         def buscar_produtos(execucao: dict[str, str]) -> dict[str, object]:
             # A #6 acrescenta a validação depois desta task.
             try:
-                catalogo = coletar_catalogo(composicao.fonte_catalogo())
+                fonte = composicao.fonte_catalogo()
+            except ValueError as erro:
+                # Configuração inválida não melhora com retentativas: falha direto.
+                raise AirflowFailException(f"configuração da FakeStore inválida: {erro}") from erro
+            try:
+                catalogo = coletar_catalogo(fonte)
             except Exception:
                 log.exception("Falha ao buscar produtos da FakeStore na run %s", execucao["run_id"])
                 raise

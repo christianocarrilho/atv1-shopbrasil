@@ -34,11 +34,13 @@ class Servidor:
     def __init__(self) -> None:
         self.resposta = (200, CATALOGO, 0.0)
         self.caminhos: list[str] = []
+        self.user_agents: list[str] = []
         servidor = self
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):  # noqa: N802
                 servidor.caminhos.append(self.path)
+                servidor.user_agents.append(self.headers.get("User-Agent", ""))
                 status, corpo, atraso = servidor.resposta
                 time.sleep(atraso)
                 self.send_response(status)
@@ -69,6 +71,11 @@ class FakeStoreHttpTest(unittest.TestCase):
         self.assertEqual(resposta[0]["price"], Decimal("109.95"))
         self.assertEqual(resposta[1]["price"], Decimal("695"))
         self.assertIsInstance(resposta[1]["price"], Decimal)
+
+    def test_envia_user_agent_proprio(self):
+        # A FakeStore real recusa o User-Agent padrão Python-urllib com 403.
+        FakeStoreHttp(self.servidor.url).buscar_produtos()
+        self.assertEqual(self.servidor.user_agents, ["shopbrasil-pipeline/1.0"])
 
     def test_timeout_padrao_de_15_segundos(self):
         self.assertEqual(FakeStoreHttp(self.servidor.url).timeout, 15)

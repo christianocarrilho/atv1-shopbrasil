@@ -158,7 +158,7 @@ from airflow.dag_processing.dagbag import DagBag
 from shopbrasil_pipeline.composicao import fonte_catalogo
 t = DagBag("/opt/airflow/dags").dags["shopbrasil_metricas"].get_task("ingestao.buscar_produtos")
 print(f"{t.retries}|{t.retry_delay.total_seconds()}|{t.retry_exponential_backoff}|{fonte_catalogo().timeout}")' 2>/dev/null | tail -1)"
-verificar "I1 retries, atraso inicial, backoff e timeout de produção" "3|60.0|True|15" "$config_busca"
+verificar "I1 retries, atraso inicial, backoff e timeout de produção" "3|60.0|2.0|15" "$config_busca"
 
 # I2. Coleta normal (run P4): uma tentativa, projeção com preços como strings decimais e XCom pequeno.
 verificar "I2 coleta normal em uma tentativa" "1:success" "$(tentativas "$RUN_ID" "$BUSCAR" | awk '{print $1}')"
