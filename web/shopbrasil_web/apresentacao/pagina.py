@@ -43,8 +43,9 @@ def criar_roteador_pagina(casos: CasosDeUso) -> APIRouter:
                  selecionada: date | None) -> dict[str, object]:
         """Filtros efetivos e série da #21; o aviso substitui a série quando o filtro não vale."""
         data_fim = converter_data("fim", fim) if fim else (selecionada or date.today())
-        data_inicio = (converter_data("inicio", inicio) if inicio
-                       else data_fim - timedelta(days=DIAS_PADRAO_EVOLUCAO - 1))
+        # Perto de date.min o padrão começa no primeiro dia representável, sem OverflowError.
+        dias_antes = min(DIAS_PADRAO_EVOLUCAO - 1, (data_fim - date.min).days)
+        data_inicio = converter_data("inicio", inicio) if inicio else data_fim - timedelta(days=dias_antes)
         codigo = categoria or (categorias[0].codigo if categorias else None)
         filtros = {"categoria": codigo, "inicio": data_inicio.isoformat(), "fim": data_fim.isoformat()}
         if codigo is None:

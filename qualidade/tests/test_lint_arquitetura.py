@@ -136,7 +136,6 @@ class TestePermitidos(BaseTeste):
             from airflow.models import BaseOperator
             from shopbrasil_pipeline.aplicacao import casos_uso
             from shopbrasil_pipeline.composicao import fakestore
-            from shopbrasil_pipeline.dominio.metricas import Decimal
             import callbacks
         """)
         r.escrever("web/shopbrasil_web/consultas/metricas.py", """
@@ -291,6 +290,15 @@ class TesteDirecaoDasCamadasPipeline(BaseTeste):
             "pipeline/shopbrasil_pipeline/infraestrutura/postgres.py",
             "from .. import composicao\n",
             "ARQ002", "pipeline_composicao",
+        )
+
+    def test_dag_nao_importa_dominio(self) -> None:
+        # O DAG aciona a aplicação; tipos e regras do domínio chegam por ela (AGENTS.md).
+        self.assertViolacao(
+            "pipeline/dags/shopbrasil_dag.py",
+            "from shopbrasil_pipeline.dominio.metricas import Decimal\n",
+            "ARQ002",
+            "pipeline_dags não pode importar pipeline_dominio",
         )
 
     def test_dag_nao_importa_adaptador_concreto(self) -> None:

@@ -189,6 +189,7 @@ SELECT count(DISTINCT task_id) FROM task_instance WHERE dag_id = '$DAG_ID' AND r
 
 # I4. Falha persistente: quatro respostas 500 esgotam a tentativa inicial e as três retentativas.
 RUN_FALHA="e2e__falha_persistente"
+ESTADO_ANTES_I4="$(estado_publicado)"
 fakestore '{"respostas": [{"status": 500}, {"status": 500}, {"status": 500}, {"status": 500}]}'
 airflow_cli dags trigger "$DAG_ID" --logical-date "2026-11-19T09:00:00+00:00" --run-id "$RUN_FALHA" >/dev/null 2>&1
 verificar "I4 run com falha persistente" "failed" "$(aguardar_run "$DAG_ID" "$RUN_FALHA" 150)"
@@ -196,6 +197,7 @@ verificar "I4 tentativas de Buscar Produtos" "1:failed 2:failed 3:failed 4:faile
 verificar "I4 análise e publicação não executadas" "upstream_failed,upstream_failed" "$(admin_sql airflow "
 SELECT string_agg(state, ',' ORDER BY task_id) FROM task_instance
 WHERE dag_id = '$DAG_ID' AND run_id = '$RUN_FALHA' AND task_id IN ('analise.consolidar', 'publicacao.publicar')")"
+verificar "I4 snapshot, histórico e cadastro intactos (valores e xmin)" "$ESTADO_ANTES_I4" "$(estado_publicado)"
 IFS=';' read -r requisicoes intervalos <<<"$(intervalos_fakestore)"
 IFS='|' read -r d1 d2 d3 <<<"$intervalos"
 # Com atraso inicial de 2 s e backoff exponencial, as esperas mínimas são 2, 4 e 8 s.
@@ -225,6 +227,9 @@ contar_log_geral() {
 
 # C1. Sucesso de Buscar Produtos na run normal (P4), na própria tentativa.
 verificar "C1 callback de sucesso" "1" "$(contar_log "$RUN_ID" "$BUSCAR" 1 "[SHOPBRASIL][SUCESSO] dag=$DAG_ID run=$RUN_ID task=$BUSCAR tentativa=1/4")"
+# C6. Depois do reprocessamento (P5), o callback conta a tentativa do ciclo atual: a 2ª execução
+# registrada (attempt=2.log) é a 1ª tentativa do novo ciclo, com 3 retentativas disponíveis.
+verificar "C6 tentativa do ciclo atual após reprocessar" "1" "$(contar_log "$RUN_ID" "$BUSCAR" 2 "[SHOPBRASIL][SUCESSO] dag=$DAG_ID run=$RUN_ID task=$BUSCAR tentativa=1/4")"
 
 # C2. Retry na falha transitória (I3): aviso na 1ª tentativa e sucesso na 2ª.
 verificar "C2 callback de retry" "1|1" "$(contar_log "$RUN_RETRY" "$BUSCAR" 1 "[SHOPBRASIL][RETRY] dag=$DAG_ID run=$RUN_RETRY task=$BUSCAR tentativa=1/4 erro=HTTPError")|$(contar_log "$RUN_RETRY" "$BUSCAR" 2 "[SHOPBRASIL][SUCESSO]")"
@@ -283,9 +288,12 @@ SELECT string_agg(state, ',' ORDER BY task_id) FROM task_instance
 WHERE dag_id = '$DAG_ID' AND run_id = '$4' AND task_id IN ('analise.consolidar', 'publicacao.publicar')")"
   verificar "$1 motivo e aviso no log" "1|1" "$(contar_log "$4" "$VALIDAR" 1 "$5")|$(contar_log "$4" "$VALIDAR" 1 "[SHOPBRASIL][FALHA] dag=$DAG_ID run=$4 task=$VALIDAR")"
 }
+# Retrato do banco antes das rejeições: cadastro, snapshot e histórico com valores e xmin.
+ESTADO_ANTES_V="$(estado_publicado)"
 validacao_rejeita "V2 catálogo vazio" vazio "2026-11-17T09:00:00+00:00" "e2e__catalogo_vazio" "Validação do catálogo: catálogo vazio"
 validacao_rejeita "V3 preço inválido" preco_invalido "2026-11-16T09:00:00+00:00" "e2e__preco_invalido" "Validação do catálogo: produto 2: preço do tipo boolean"
 validacao_rejeita "V4 categoria em branco" categoria_em_branco "2026-11-15T09:00:00+00:00" "e2e__categoria_em_branco" "Validação do catálogo: produto 3: categoria em branco"
+verificar "V5 snapshot, histórico e cadastro intactos após V2–V4" "$ESTADO_ANTES_V" "$(estado_publicado)"
 
 # ------------------------------------------------------------------------------- #16
 CALCULAR="analise.calcular_metricas"
@@ -345,10 +353,12 @@ FROM metricas_categoria m JOIN categoria c ON c.id = m.categoria_id WHERE c.codi
 # M6. Falhas preservam o que já foi publicado: as runs recusadas (V2–V4) e a falha da FakeStore (I4)
 # não gravaram snapshot, e o reprocessamento da run de 21/11 com catálogo vazio mantém o dia intacto.
 verificar "M6 runs com falha sem snapshot" "0" "$(leitor_sql "SELECT count(*) FROM metricas_categoria WHERE data_referencia IN ('2026-11-19', '2026-11-17', '2026-11-16', '2026-11-15')")"
+ESTADO_ANTES_M6="$(estado_publicado)"
 fakestore '{"respostas": [{"catalogo": "vazio"}]}'
 airflow_cli tasks clear "$DAG_ID" -s "$OCORRENCIA" -e "$OCORRENCIA" -y >/dev/null 2>&1
 sleep 3
 verificar "M6 reprocessamento com catálogo vazio falha" "failed" "$(aguardar_run "$DAG_ID" "$RUN_ID")"
 verificar "M6 snapshot de 21/11 preservado" "$SNAPSHOT_PADRAO" "$(snapshot_do_dia 2026-11-21)"
+verificar "M6 snapshot, histórico e cadastro intactos (valores e xmin)" "$ESTADO_ANTES_M6" "$(estado_publicado)"
 
 resumo

@@ -200,5 +200,13 @@ class PaginaTest(unittest.TestCase):
         self.assertEqual(422, status)
 
 
+    def test_data_valida_extrema_nao_derruba_a_pagina(self) -> None:
+        status, _, pagina = obter(self.app, "/", data="0001-01-01")
+        self.assertEqual(200, status)
+        self.assertIn("Sem métricas para esta data", pagina)
+        serie = dados_embutidos(pagina, "evolucao-dados")
+        self.assertEqual(("0001-01-01", "0001-01-01", 1), (serie["inicio"], serie["fim"], len(serie["pontos"])))
+
+
 if __name__ == "__main__":
     unittest.main()

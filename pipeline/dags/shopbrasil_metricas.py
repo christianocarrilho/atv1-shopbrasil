@@ -40,12 +40,14 @@ from shopbrasil_pipeline.aplicacao.alertas import (
     notificar_retry,
     notificar_sucesso,
 )
-from shopbrasil_pipeline.aplicacao.analise import agrupar_por_categoria, consolidar_metricas
+from shopbrasil_pipeline.aplicacao.analise import (
+    agrupar_por_categoria,
+    calcular_categoria,
+    consolidar_metricas,
+    metricas_de_xcom,
+)
 from shopbrasil_pipeline.aplicacao.catalogo import coletar_catalogo
-from shopbrasil_pipeline.aplicacao.execucao import Execucao, identificar_execucao
-from shopbrasil_pipeline.dominio.metricas import MetricasCategoria, PrecosCategoria
-from shopbrasil_pipeline.dominio.metricas import calcular_metricas as calcular_categoria
-from shopbrasil_pipeline.dominio.calendario import FUSO_REFERENCIA
+from shopbrasil_pipeline.aplicacao.execucao import FUSO_REFERENCIA, Execucao, identificar_execucao
 
 DAG_ID = "shopbrasil_metricas"
 # O fuso da agenda é o mesmo da regra da data de referência.
@@ -177,13 +179,13 @@ def shopbrasil_metricas():
         def calcular_metricas(entrada: dict[str, object]) -> dict[str, object]:
             if CALCULO_ATRASO_SEGUNDOS:
                 time.sleep(CALCULO_ATRASO_SEGUNDOS)
-            return calcular_categoria(PrecosCategoria.de_xcom(entrada)).para_xcom()
+            return calcular_categoria(entrada)
 
         @task
         def consolidar(grupos: list[dict[str, object]], resultados) -> list[dict[str, object]]:
             # Fan-in: exige exatamente um resultado para cada categoria agrupada.
             metricas = consolidar_metricas(
-                (MetricasCategoria.de_xcom(r) for r in resultados),
+                metricas_de_xcom(resultados),
                 esperadas=[g["codigo_categoria"] for g in grupos],
             )
             return [m.para_xcom() for m in metricas]
@@ -198,7 +200,7 @@ def shopbrasil_metricas():
         @task
         def publicar(execucao: dict[str, str], metricas: list[dict[str, object]]) -> dict[str, object]:
             resultado = composicao.publicar_snapshot().executar(
-                Execucao.de_xcom(execucao), [MetricasCategoria.de_xcom(m) for m in metricas]
+                Execucao.de_xcom(execucao), list(metricas_de_xcom(metricas))
             )
             log.info("Snapshot publicado: %s", resultado.para_xcom())
             return resultado.para_xcom()

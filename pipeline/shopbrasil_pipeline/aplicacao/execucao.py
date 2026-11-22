@@ -14,7 +14,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 
-from shopbrasil_pipeline.dominio.calendario import data_referencia
+from shopbrasil_pipeline.dominio.calendario import FUSO_REFERENCIA, data_referencia
+
+# FUSO_REFERENCIA é reexportado para que o DAG use o fuso da agenda sem importar o domínio.
 
 
 class OcorrenciaAusenteError(ValueError):

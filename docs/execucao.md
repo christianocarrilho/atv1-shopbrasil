@@ -50,15 +50,15 @@ Na interface (Grid), confira a sequência preparação → ingestão (Buscar Pro
 
 Abra http://localhost:8000. O painel abre na última data com métricas, mostra a tabela e as barras do preço médio e, abaixo, a linha de evolução com filtros de categoria e intervalo. Data sem registros exibe “Sem métricas para esta data”.
 
-Snapshot e histórico por run, lidos pela conta de leitura:
+Snapshot e histórico por run, lidos pela conta de leitura (a mesma da web, sem permissão de escrita). Carregue antes as variáveis do `.env` no shell (`set -a; . ./.env; set +a`):
 
 ```sh
-docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d shopbrasil -c "
+docker compose exec -e PGPASSWORD="$SHOPBRASIL_DB_READER_PASSWORD" postgres psql -h postgres -U shopbrasil_reader -d shopbrasil -c "
   SELECT m.data_referencia, c.codigo, m.preco_medio, m.preco_minimo, m.preco_maximo, m.quantidade_produtos
-    FROM metricas_categoria m JOIN categoria c ON c.id = m.categoria_id ORDER BY 1, 2;"'
-docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d shopbrasil -c "
+    FROM metricas_categoria m JOIN categoria c ON c.id = m.categoria_id ORDER BY 1, 2;"
+docker compose exec -e PGPASSWORD="$SHOPBRASIL_DB_READER_PASSWORD" postgres psql -h postgres -U shopbrasil_reader -d shopbrasil -c "
   SELECT h.run_id, h.data_execucao, c.codigo, h.preco_medio, h.quantidade_produtos
-    FROM metricas_categoria_historico h JOIN categoria c ON c.id = h.categoria_id ORDER BY 1, 3;"'
+    FROM metricas_categoria_historico h JOIN categoria c ON c.id = h.categoria_id ORDER BY 1, 3;"
 ```
 
 ## 5. Reprocessar a própria run

@@ -54,5 +54,15 @@ class AnaliseTest(unittest.TestCase):
             consolidar_metricas([])
 
 
+    def test_calcular_categoria_em_xcom(self):
+        from shopbrasil_pipeline.aplicacao.analise import calcular_categoria
+
+        self.assertEqual(
+            {"codigo_categoria": "x", "preco_medio": "10.01", "preco_minimo": "10.00", "preco_maximo": "10.01",
+             "quantidade_produtos": 3},
+            calcular_categoria({"codigo_categoria": "x", "precos": ["10.00", "10.01", "10.01"]}),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

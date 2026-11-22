@@ -147,3 +147,38 @@ resumo() {
   if [[ $FALHAS -eq 0 ]]; then echo "E2E $E2E_NOME: todos os cenários passaram"; else echo "E2E $E2E_NOME: $FALHAS falha(s)"; fi
   exit $(( FALHAS > 0 ))
 }
+
+navegador_painel() {
+  # navegador_painel <data> <data_vazia> <categoria> <inicio> <fim>: abre o painel do serviço web
+  # num Chromium real (e2e/navegador), na rede do projeto, e imprime o resumo desenhado (#23):
+  # chartjs | preços médios da tabela | valores das barras | URL, mensagens e gráfico após trocar
+  # a data | valores da linha | spanGaps | erros de console.
+  docker build -q -t shopbrasil-e2e-navegador:1.49.0 "$ROOT/e2e/navegador" >"$LOG_DIR/navegador-build.log" 2>&1 || { echo "build do navegador falhou"; return; }
+  docker run --rm --network "${PROJECT}_default" -v "$ROOT/e2e/navegador:/navegador:ro" shopbrasil-e2e-navegador:1.49.0 \
+    python /navegador/painel.py http://web:8000 "$@" 2>>"$LOG_DIR/navegador.err" \
+    | python3 -c '
+import json, sys
+r = json.load(sys.stdin)
+num = lambda v: "None" if v is None else ("%g" % v)
+print("|".join([
+    r["chartjs"],
+    ",".join(r["tabela_preco_medio"]),
+    ",".join(num(v) for v in r["barras"]["valores"]) + "@" + str(r["barras"]["desenhado"]),
+    r["vazio_url"] + ";" + r["vazio_texto"] + ";" + r["vazio_barras"] + ";" + str(r["vazio_tem_grafico_barras"]),
+    ",".join(num(v) for v in r["linha"]["valores"]) + "@" + str(r["linha"]["desenhado"]),
+    "spanGaps=" + str(r["linha"]["spanGaps"]),
+    "erros=" + str(len(r["erros"])),
+]))'
+}
+
+estado_publicado() {
+  # Retrato do que já está publicado, lido pela conta de leitura: contagens de cadastro, snapshot e
+  # histórico e um md5 de todas as linhas com valores e xmin. Igualdade antes e depois de uma falha
+  # prova que nada foi inserido, alterado, regravado ou removido (#23).
+  psql_como shopbrasil_reader "$READER_PASSWORD" shopbrasil -c "
+    SELECT (SELECT count(*) FROM categoria) || '|' || (SELECT count(*) FROM metricas_categoria) || '|'
+        || (SELECT count(*) FROM metricas_categoria_historico) || '|' || md5(
+          coalesce((SELECT string_agg(id || ':' || codigo || ':' || descricao || ':' || xmin, ';' ORDER BY id) FROM categoria), '') || '#' ||
+          coalesce((SELECT string_agg(id || ':' || categoria_id || ':' || data_referencia || ':' || preco_medio || ':' || preco_minimo || ':' || preco_maximo || ':' || quantidade_produtos || ':' || xmin, ';' ORDER BY id) FROM metricas_categoria), '') || '#' ||
+          coalesce((SELECT string_agg(run_id || ':' || categoria_id || ':' || data_execucao || ':' || preco_medio || ':' || preco_minimo || ':' || preco_maximo || ':' || quantidade_produtos || ':' || xmin, ';' ORDER BY run_id, categoria_id) FROM metricas_categoria_historico), ''))"
+}

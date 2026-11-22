@@ -8,7 +8,8 @@
 # lacunas em ordem de data, categorias, erros 422/400/404, preços como strings decimais e que a
 # conta da web só lê. Página do painel (#19): abre na última data, filtro por data, estado vazio
 # e mesmos valores da API. Barras (#20): mesma coleção da tabela, estado vazio e Chart.js local.
-# Linha (#21): filtros de categoria e intervalo, série igual à API, lacunas como null. O Airflow não sobe: a web depende só do esquema e da conta de leitura.
+# Linha (#21): filtros de categoria e intervalo, série igual à API, lacunas como null.
+# G (#23): o painel operado num Chromium real, com os valores entregues ao Chart.js. O Airflow não sobe: a web depende só do esquema e da conta de leitura.
 #
 # Uso: e2e/web/executar.sh
 # Variáveis opcionais: E2E_AIRFLOW_API_PORT (porta da web neste cenário; padrão 18110, ou a
@@ -142,5 +143,11 @@ verificar "E3 categoria com espaço e apóstrofo" "men's clothing|2026-11-20|202
 verificar "E4 intervalo invertido vira aviso" "null|Intervalo inválido: início 2026-11-23 depois do fim 2026-11-20" \
   "$(evolucao_da_pagina '?categoria=electronics&inicio=2026-11-23&fim=2026-11-20')"
 verificar "E4 categoria desconhecida vira aviso" "null|Categoria 'toys' não cadastrada" "$(evolucao_da_pagina '?categoria=toys')"
+
+# G. Navegador real (#23): Chart.js desenha as barras com os preços da tabela; a troca de data no
+# campo leva ao estado vazio; os filtros da evolução desenham a linha com lacunas (null, spanGaps false).
+verificar "G1 painel no Chromium: barras, troca de data, linha e console" \
+  "4.6.1|10.00,10.01|10,10.01@2|data=2026-11-21;Sem métricas para esta data;Sem métricas para esta data;False|20,None,10,None@4|spanGaps=False|erros=0" \
+  "$(navegador_painel 2026-11-22 2026-11-21 electronics 2026-11-20 2026-11-23)"
 
 resumo
