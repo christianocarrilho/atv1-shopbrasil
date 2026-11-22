@@ -8,25 +8,43 @@ Define a orquestração com TaskFlow: o DAG aciona casos de uso da aplicação e
 HTTP nem fórmulas. As dependências vêm das chamadas entre as funções e as etapas ficam em
 TaskGroups de preparação, ingestão, análise e publicação.
 
+Callbacks (#14): Buscar Produtos tem callbacks de sucesso, retry e falha, e a falha definitiva
+simula o envio de alerta. Toda outra task herda de ``default_args`` o aviso de falha, gravado no
+log da própria tentativa, e o DAG avisa a falha da run inteira, inclusive a marcada pela UI.
+
 A agenda usa ``CronTriggerTimetable`` explícito: no Airflow 3.4 a data lógica de cada run é a
 própria ocorrência das 06:00 em ``America/Sao_Paulo``, sem intervalo de dados a deslocar a data.
-Buscar Produtos (#13) usa a FakeStore pela composição. As tasks de análise e publicação são o
-esqueleto que #16 e #17 substituem; a #6 acrescenta a validação na ingestão.
+Trechos: linear (preparação → Buscar Produtos (#13) → ``ValidarProdutosOperator`` (#6) →
+agrupamento), fan-out (``calcular_metricas.expand`` por categoria observada, no ``ecommerce_pool``)
+e fan-in (``consolidar``), seguido da publicação transacional (#17/#18) pela composição (#16).
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import time
 from datetime import timedelta
 
 import pendulum
-from airflow.exceptions import AirflowFailException
+from airflow.sdk.exceptions import AirflowFailException
 from airflow.sdk import CronTriggerTimetable, dag, get_current_context, task, task_group
 
+from operadores.validar_produtos import ValidarProdutosOperator
 from shopbrasil_pipeline import composicao
+from shopbrasil_pipeline.aplicacao.alertas import (
+    OcorrenciaTask,
+    notificar_falha,
+    notificar_falha_ingestao,
+    notificar_falha_run,
+    notificar_retry,
+    notificar_sucesso,
+)
+from shopbrasil_pipeline.aplicacao.analise import agrupar_por_categoria, consolidar_metricas
 from shopbrasil_pipeline.aplicacao.catalogo import coletar_catalogo
-from shopbrasil_pipeline.aplicacao.execucao import identificar_execucao
+from shopbrasil_pipeline.aplicacao.execucao import Execucao, identificar_execucao
+from shopbrasil_pipeline.dominio.metricas import MetricasCategoria, PrecosCategoria
+from shopbrasil_pipeline.dominio.metricas import calcular_metricas as calcular_categoria
 from shopbrasil_pipeline.dominio.calendario import FUSO_REFERENCIA
 
 DAG_ID = "shopbrasil_metricas"
@@ -46,7 +64,54 @@ BUSCA_RETRIES = 3
 BUSCA_BACKOFF = 2.0
 BUSCA_RETRY_DELAY = timedelta(seconds=int(os.environ.get("SHOPBRASIL_BUSCA_RETRY_DELAY_SEGUNDOS", "60")))
 
+# Tasks mapeadas por categoria dividem o pool de dois slots provisionado na #2.
+POOL_CALCULO = "ecommerce_pool"
+# Atraso artificial por task mapeada, só no override E2E, para tornar observável o limite do pool.
+CALCULO_ATRASO_SEGUNDOS = float(os.environ.get("SHOPBRASIL_CALCULO_ATRASO_SEGUNDOS", "0"))
+
 log = logging.getLogger(__name__)
+
+
+def _ocorrencia(contexto) -> OcorrenciaTask:
+    """Traduz o contexto do callback do Airflow para a ocorrência da aplicação."""
+    ti = contexto["ti"]
+    retries = contexto["task"].retries
+    erro = contexto.get("exception")
+    # Depois de um clear, try_number continua crescendo e max_tries = try_number + retries.
+    # A tentativa é contada no ciclo atual, como faz o próprio Airflow ao decidir o retry.
+    inicio_ciclo = getattr(ti, "max_tries", retries) - retries
+    return OcorrenciaTask(
+        dag_id=ti.dag_id,
+        run_id=ti.run_id,
+        task_id=ti.task_id,
+        tentativa=ti.try_number - inicio_ciclo,
+        max_tentativas=retries + 1,
+        erro=f"{type(erro).__name__}: {erro}" if erro else None,
+    )
+
+
+# Callbacks: o Airflow chama estas funções no processo da task, e as mensagens vão para o log
+# daquela tentativa. Qualquer task que falhe emite o aviso; a ingestão também simula o alerta.
+def avisar_falha(contexto) -> None:
+    notificar_falha(composicao.notificador(), _ocorrencia(contexto))
+
+
+def busca_sucesso(contexto) -> None:
+    notificar_sucesso(composicao.notificador(), _ocorrencia(contexto))
+
+
+def busca_retry(contexto) -> None:
+    notificar_retry(composicao.notificador(), _ocorrencia(contexto))
+
+
+def busca_falha(contexto) -> None:
+    notificar_falha_ingestao(composicao.notificador(), _ocorrencia(contexto))
+
+
+def avisar_falha_run(contexto) -> None:
+    # Callback do DAG: no Airflow 3 roda no dag-processor, e a linha vai para o log dele.
+    dag_run = contexto["dag_run"]
+    notificar_falha_run(composicao.notificador(), dag_run.dag_id, dag_run.run_id, contexto.get("reason"))
 
 
 @dag(
@@ -55,6 +120,8 @@ log = logging.getLogger(__name__)
     start_date=START_DATE,
     catchup=False,
     max_active_runs=1,
+    default_args={"on_failure_callback": avisar_falha},
+    on_failure_callback=avisar_falha_run,
     tags=["shopbrasil", "fakestore"],
     doc_md=__doc__,
 )
@@ -75,9 +142,11 @@ def shopbrasil_metricas():
             retries=BUSCA_RETRIES,
             retry_delay=BUSCA_RETRY_DELAY,
             retry_exponential_backoff=BUSCA_BACKOFF,
+            on_success_callback=busca_sucesso,
+            on_retry_callback=busca_retry,
+            on_failure_callback=busca_falha,
         )
         def buscar_produtos(execucao: dict[str, str]) -> dict[str, object]:
-            # A #6 acrescenta a validação depois desta task.
             try:
                 fonte = composicao.fonte_catalogo()
             except ValueError as erro:
@@ -91,23 +160,48 @@ def shopbrasil_metricas():
             log.info("Catálogo coletado: raiz %s com %d produto(s)", catalogo.tipo_raiz, len(catalogo.produtos))
             return catalogo.para_xcom()
 
-        return buscar_produtos(execucao)
+        # Linear: a validação recebe a coleta pelo XCom e precede qualquer cálculo.
+        validar = ValidarProdutosOperator(task_id="validar_produtos", catalogo=buscar_produtos(execucao))
+        return validar.output
 
     @task_group(group_id="analise")
-    def analise(produtos: dict[str, object]):
+    def analise(validados: dict[str, object]):
         @task
-        def consolidar(produtos: dict[str, object]) -> dict[str, object]:
-            # Esqueleto da #4: a #16 agrupa, expande por categoria e consolida pela #15.
-            return {"etapa": "analise", "produtos": len(produtos["produtos"])}
+        def agrupar_por_categoria_task(validados: dict[str, object]) -> list[dict[str, object]]:
+            # Uma entrada por código observado na coleta; nenhuma lista fixa de categorias.
+            grupos = agrupar_por_categoria(validados["produtos"])
+            log.info("Categorias para o fan-out: %s", [g.codigo_categoria for g in grupos])
+            return [g.para_xcom() for g in grupos]
 
-        return consolidar(produtos)
+        @task(pool=POOL_CALCULO)
+        def calcular_metricas(entrada: dict[str, object]) -> dict[str, object]:
+            if CALCULO_ATRASO_SEGUNDOS:
+                time.sleep(CALCULO_ATRASO_SEGUNDOS)
+            return calcular_categoria(PrecosCategoria.de_xcom(entrada)).para_xcom()
+
+        @task
+        def consolidar(grupos: list[dict[str, object]], resultados) -> list[dict[str, object]]:
+            # Fan-in: exige exatamente um resultado para cada categoria agrupada.
+            metricas = consolidar_metricas(
+                (MetricasCategoria.de_xcom(r) for r in resultados),
+                esperadas=[g["codigo_categoria"] for g in grupos],
+            )
+            return [m.para_xcom() for m in metricas]
+
+        grupos = agrupar_por_categoria_task.override(task_id="agrupar_por_categoria")(validados)
+        # Fan-out: uma instância mapeada por categoria, limitada pelo ecommerce_pool.
+        resultados = calcular_metricas.expand(entrada=grupos)
+        return consolidar(grupos, resultados)
 
     @task_group(group_id="publicacao")
-    def publicacao(execucao: dict[str, str], metricas: dict[str, object]):
+    def publicacao(execucao: dict[str, str], metricas: list[dict[str, object]]):
         @task
-        def publicar(execucao: dict[str, str], metricas: dict[str, object]) -> dict[str, str]:
-            # Esqueleto da #4: a #17 e a #18 publicam snapshot e histórico na mesma transação.
-            return {**execucao, "etapa": "publicacao"}
+        def publicar(execucao: dict[str, str], metricas: list[dict[str, object]]) -> dict[str, object]:
+            resultado = composicao.publicar_snapshot().executar(
+                Execucao.de_xcom(execucao), [MetricasCategoria.de_xcom(m) for m in metricas]
+            )
+            log.info("Snapshot publicado: %s", resultado.para_xcom())
+            return resultado.para_xcom()
 
         return publicar(execucao, metricas)
 

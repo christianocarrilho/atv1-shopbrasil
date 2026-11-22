@@ -201,6 +201,61 @@ O cenário chama o caso de uso diretamente porque o DAG só passa a acionar a pu
 
 Revisão cruzada do Claude sobre 6e8763c: aprovado, sem bloqueantes. A transação é única: o bloco `with conexao` do psycopg2 faz commit ao sair e rollback em qualquer exceção. O conjunto do dia é apagado e reinserido. Coleção vazia e código repetido são recusados antes de abrir a transação. O ponto de extensão `etapas_adicionais` compartilha o cursor com a #18. A aplicação não tem SQL nem Airflow. Na integração com a #13 (b2f180c), as duas fábricas ficaram em `composicao.py`; o adaptador PostgreSQL é importado dentro da função, para que os testes unitários não dependam do provider. Sobre essa revisão: `e2e/publicacao/executar.sh` terminou com código 0 e 26 verificações PASS; testes unitários `OK`; lint `OK: 18 arquivo(s) Python verificado(s), nenhuma violação de arquitetura.`
 
+## #14 — Callbacks, aviso de falha e alerta simulado
+
+Validação executada em 22 nov. 2026, com Docker 29.9.2 e Docker Compose v5.6.1, sobre a revisão 1d297b1 (base `integracao-backlog` c7e5d74).
+
+Comando: `e2e/pipeline/executar.sh`. Código de saída 0 e 39 verificações PASS: as 32 da #4 e da #13 e as 7 da #14. Os callbacks gravam no log de cada tentativa (`/opt/airflow/logs/dag_id=.../run_id=.../task_id=.../attempt=N.log`).
+
+| Cenário | Resultado | Observado |
+|---|---|---|
+| C1 sucesso | PASS | `[SHOPBRASIL][SUCESSO] ... task=ingestao.buscar_produtos tentativa=1/4` na run normal |
+| C2 retry e recuperação | PASS | `[SHOPBRASIL][RETRY] ... tentativa=1/4 erro=HTTPError` na 1ª tentativa e `[SUCESSO]` na 2ª; nenhum alerta |
+| C3 falha definitiva | PASS | 3 linhas `[RETRY]` nas tentativas 1 a 3, `[FALHA] ... tentativa=4/4` e um único `[ALERTA SIMULADO]`, só na 4ª tentativa |
+| C4 falha de outra task | PASS | `[SHOPBRASIL][FALHA] ... task=preparacao.identificar tentativa=1/1 erro=OcorrenciaAusenteError` na run sem data lógica, sem alerta |
+
+Linhas reais da run `e2e__falha_persistente`:
+
+```text
+[SHOPBRASIL][RETRY] dag=shopbrasil_metricas run=e2e__falha_persistente task=ingestao.buscar_produtos tentativa=1/4 erro=HTTPError: HTTP Error 500: Internal Server Error
+[SHOPBRASIL][FALHA] dag=shopbrasil_metricas run=e2e__falha_persistente task=ingestao.buscar_produtos tentativa=4/4 erro=HTTPError: HTTP Error 500: Internal Server Error
+[SHOPBRASIL][ALERTA SIMULADO] destino=equipe-dados@shopbrasil.example assunto=ShopBrasil: ingestão da FakeStore falhou na run e2e__falha_persistente | Buscar Produtos esgotou 4 tentativa(s); a publicação da run não ocorreu. ...
+```
+
+Testes unitários: `Ran 54 tests ... OK`. Lint: `OK: 21 arquivo(s) Python verificado(s), nenhuma violação de arquitetura.`
+
+Revisão cruzada do Kiro sobre 1d297b1: aprovável com recomendações, sem bloqueantes. Ajustes em 30ddff2:
+- tentativa contada no ciclo atual, que continua correta depois de `tasks clear`;
+- falha sem retentativa (`AirflowFailException`) gera alerta "sem retentativa (erro não recuperável)", e não "esgotou";
+- `on_failure_callback` do DAG emite `[SHOPBRASIL][FALHA RUN]`, gravado no log do dag-processor;
+- C2 confirma que não há `[FALHA]` na recuperação;
+- texto procurado nos logs passado ao grep como argumento.
+
+Sobre 30ddff2, `e2e/pipeline/executar.sh` terminou com código 0 e 40 PASS, incluindo `C5 aviso de falha da run`: 1 linha `[FALHA RUN]` para `e2e__falha_persistente`. Testes unitários: `Ran 56 tests ... OK`.
+
+## #6 — ValidarProdutosOperator
+
+Validação executada em 22 nov. 2026, com Docker 29.9.2 e Docker Compose v5.6.1, sobre a revisão 2221b50 (base `integracao-backlog` 455860c). As regras ficam em `pipeline/shopbrasil_pipeline/aplicacao/validacao.py`, e o operador em `pipeline/dags/operadores/validar_produtos.py`.
+
+Comando: `e2e/pipeline/executar.sh`, com os catálogos controlados `sem_joias`, `vazio`, `preco_invalido` e `categoria_em_branco` em `e2e/fakestore/catalogos/`. Código de saída 0 e 55 verificações PASS, incluindo as 15 da #6.
+
+| Cenário | Resultado | Observado |
+|---|---|---|
+| P2 estrutura | PASS | aresta linear `ingestao.buscar_produtos>ingestao.validar_produtos>analise.consolidar` |
+| V1 coleta normal | PASS | XCom do operador com `electronics,jewelery,men's clothing,women's clothing` e 6 produtos (`codigo_categoria`, `preco`) |
+| V1 categoria ausente | PASS | catálogo sem `jewelery` aceito; run `success`; 3 categorias e 3 produtos |
+| V2 catálogo vazio | PASS | run `failed`; coleta `1:success`, validação `1:failed` sem retentativa; análise e publicação `upstream_failed`; log `Validação do catálogo: catálogo vazio` e aviso `[SHOPBRASIL][FALHA] ... task=ingestao.validar_produtos` |
+| V3 preço inválido | PASS | mesmo comportamento; log `Validação do catálogo: produto 2: preço do tipo boolean` |
+| V4 categoria em branco | PASS | mesmo comportamento; log `Validação do catálogo: produto 3: categoria em branco` |
+
+A preservação do snapshot publicado nas rejeições é conferida no banco a partir da #16, quando a publicação passa a ser chamada pelo DAG. Até a #6, a publicação nem chega a ser executada (`upstream_failed`).
+
+Testes unitários: `Ran 62 tests ... OK`. Cobrem catálogo válido sem arredondamento, categoria ausente, vazio, raiz que não é lista, categoria em branco, nula, numérica ou ausente, preço booleano, texto, nulo, negativo, lista ou `NaN`, e a lista de todos os motivos. Lint: `OK: 25 arquivo(s) Python verificado(s), nenhuma violação de arquitetura.`
+
+Ajustes descobertos na verificação:
+- Importar `AirflowFailException` de `airflow.sdk.exceptions`, porque o caminho antigo está depreciado no 3.4.
+- As consultas ad hoc ao DagBag no E2E usam o `PYTHONPATH` dos processos do Airflow, que inclui a pasta de DAGs.
+
 ## #18 — Histórico por run na transação de publicação
 
 Validação executada em 22 nov. 2026, com Docker 29.9.2, Docker Compose v5.6.1 e Python 3.14.7 (macOS), sobre a revisão eebc845 (base `integracao-backlog` c7e5d74). O desenho está no [README da infraestrutura](../pipeline/shopbrasil_pipeline/infraestrutura/README.md#histórico-por-run-18).

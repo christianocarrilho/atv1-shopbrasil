@@ -1,0 +1,10 @@
+[
+  {"id": 1, "title": "Mochila Fjallraven", "price": 109.95, "category": "men's clothing"},
+  {"id": 2, "title": "Camiseta slim", "price": 22.3, "category": "men's clothing"},
+  {"id": 5, "title": "Pulseira dragão", "price": 695, "category": "jewelery"},
+  {"id": 9, "title": "HD externo 2TB", "price": 64, "category": "electronics"},
+  {"id": 10, "title": "SSD 1TB", "price": 109, "category": "electronics"},
+  {"id": 18, "title": "Blusa feminina", "price": 9.85, "category": "women's clothing"},
+  {"id": 21, "title": "Quebra-cabeça 1000 peças", "price": 15.5, "category": "toys"},
+  {"id": 22, "title": "Carrinho de controle remoto", "price": 120.01, "category": "toys"}
+]
