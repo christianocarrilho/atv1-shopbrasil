@@ -14,8 +14,9 @@ log da própria tentativa, e o DAG avisa a falha da run inteira, inclusive a mar
 
 A agenda usa ``CronTriggerTimetable`` explícito: no Airflow 3.4 a data lógica de cada run é a
 própria ocorrência das 06:00 em ``America/Sao_Paulo``, sem intervalo de dados a deslocar a data.
-Buscar Produtos (#13) usa a FakeStore pela composição. As tasks de análise e publicação são o
-esqueleto que #16 e #17 substituem; a #6 acrescenta a validação na ingestão.
+Buscar Produtos (#13) usa a FakeStore pela composição e ``ValidarProdutosOperator`` (#6) confere
+o catálogo antes do cálculo. As tasks de análise e publicação são o esqueleto que #16 e #17
+substituem.
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ import pendulum
 from airflow.exceptions import AirflowFailException
 from airflow.sdk import CronTriggerTimetable, dag, get_current_context, task, task_group
 
+from operadores.validar_produtos import ValidarProdutosOperator
 from shopbrasil_pipeline import composicao
 from shopbrasil_pipeline.aplicacao.alertas import (
     OcorrenciaTask,
@@ -136,7 +138,6 @@ def shopbrasil_metricas():
             on_failure_callback=busca_falha,
         )
         def buscar_produtos(execucao: dict[str, str]) -> dict[str, object]:
-            # A #6 acrescenta a validação depois desta task.
             try:
                 fonte = composicao.fonte_catalogo()
             except ValueError as erro:
@@ -150,7 +151,9 @@ def shopbrasil_metricas():
             log.info("Catálogo coletado: raiz %s com %d produto(s)", catalogo.tipo_raiz, len(catalogo.produtos))
             return catalogo.para_xcom()
 
-        return buscar_produtos(execucao)
+        # Linear: a validação recebe a coleta pelo XCom e precede qualquer cálculo.
+        validar = ValidarProdutosOperator(task_id="validar_produtos", catalogo=buscar_produtos(execucao))
+        return validar.output
 
     @task_group(group_id="analise")
     def analise(produtos: dict[str, object]):

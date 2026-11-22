@@ -11,6 +11,8 @@
 # e falha persistente propagada após as tentativas, com backoff exponencial.
 # Cobertura da #14: callbacks de sucesso, retry e falha de Buscar Produtos, alerta simulado só na
 # falha definitiva da ingestão e aviso identificável na falha de outra task.
+# Cobertura da #6: catálogo válido com categoria ausente aceito; catálogo vazio, preço inválido e
+# categoria em branco recusados pelo ValidarProdutosOperator antes do cálculo, sem retentativa.
 # As issues seguintes do pipeline acrescentam seus cenários a este arquivo.
 #
 # Uso: e2e/pipeline/executar.sh
@@ -44,7 +46,7 @@ print(",".join(grupos) + "|" + " ".join(arestas))
 PY
 )"
 verificar "P2 TaskGroups e dependências" \
-  "analise,ingestao,preparacao,publicacao|analise.consolidar>publicacao.publicar ingestao.buscar_produtos>analise.consolidar preparacao.identificar>ingestao.buscar_produtos preparacao.identificar>publicacao.publicar" \
+  "analise,ingestao,preparacao,publicacao|analise.consolidar>publicacao.publicar ingestao.buscar_produtos>ingestao.validar_produtos ingestao.validar_produtos>analise.consolidar preparacao.identificar>ingestao.buscar_produtos preparacao.identificar>publicacao.publicar" \
   "$estrutura"
 
 # P3. Agenda: cron das 06:00 em Brasília, start_date com pendulum e catchup=False.
@@ -94,7 +96,7 @@ xcom_execucao() {
       AND x.key = 'return_value' $filtro_tentativa ORDER BY ti.try_number DESC LIMIT 1"
 }
 verificar "P4 data de referência da ocorrência" "$RUN_ID|2026-11-21" "$(xcom_execucao)"
-verificar "P4 tasks da run" "4|4" "$(admin_sql airflow "
+verificar "P4 tasks da run" "5|5" "$(admin_sql airflow "
 SELECT count(*), count(*) FILTER (WHERE state = 'success') FROM task_instance WHERE dag_id = '$DAG_ID' AND run_id = '$RUN_ID'")"
 verificar "P4 run agendada real" "success" "$(aguardar_run "$DAG_ID" "$AGENDADA")"
 verificar "P4 data de referência da run agendada" "$AGENDADA|$(admin_sql airflow "SELECT $ULTIMA_SQL")" "$(xcom_execucao "$AGENDADA")"
@@ -104,7 +106,7 @@ airflow_cli tasks clear "$DAG_ID" -s "$OCORRENCIA" -e "$OCORRENCIA" -y >/dev/nul
 sleep 3
 verificar "P5 run reprocessada" "success" "$(aguardar_run "$DAG_ID" "$RUN_ID")"
 verificar "P5 mesma run e data de referência original na 2ª tentativa" "$RUN_ID|2026-11-21" "$(xcom_execucao "$RUN_ID" 2)"
-verificar "P5 uma run, quatro tasks, segunda tentativa com sucesso" "1|4|4" "$(admin_sql airflow "
+verificar "P5 uma run, cinco tasks, segunda tentativa com sucesso" "1|5|5" "$(admin_sql airflow "
 SELECT (SELECT count(*) FROM dag_run WHERE dag_id = '$DAG_ID' AND logical_date = '$OCORRENCIA'),
        count(DISTINCT task_id), count(*) FILTER (WHERE try_number = 2 AND state = 'success')
 FROM task_instance WHERE dag_id = '$DAG_ID' AND run_id = '$RUN_ID'")"
@@ -178,7 +180,7 @@ verificar "I3 run com falha transitória" "success" "$(aguardar_run "$DAG_ID" "$
 # No Airflow 3.4 cada tentativa encerrada fica na própria linha; a que levou à retentativa fica failed.
 verificar "I3 tentativas de Buscar Produtos" "1:failed 2:success" "$(tentativas "$RUN_RETRY" "$BUSCAR")"
 verificar "I3 requisições à FakeStore" "2" "$(intervalos_fakestore | cut -d';' -f1)"
-verificar "I3 tasks seguintes executadas" "3" "$(admin_sql airflow "
+verificar "I3 tasks seguintes executadas" "4" "$(admin_sql airflow "
 SELECT count(DISTINCT task_id) FROM task_instance WHERE dag_id = '$DAG_ID' AND run_id = '$RUN_RETRY' AND task_id <> '$BUSCAR' AND state = 'success'")"
 
 # I4. Falha persistente: quatro respostas 500 esgotam a tentativa inicial e as três retentativas.
@@ -244,5 +246,41 @@ if [[ "$falha_run" =~ ^[1-9] ]]; then registrar PASS "C5 aviso de falha da run" 
 
 # C4. Outra falha do pipeline (P6, sem data lógica): aviso identificável, sem alerta da ingestão.
 verificar "C4 aviso em falha de outra task" "1|0" "$(contar_log "$SEM_DATA" "preparacao.identificar" '*' "[SHOPBRASIL][FALHA] dag=$DAG_ID run=$SEM_DATA task=preparacao.identificar")|$(contar_log "$SEM_DATA" "preparacao.identificar" '*' "[ALERTA SIMULADO]")"
+
+# -------------------------------------------------------------------------------- #6
+VALIDAR="ingestao.validar_produtos"
+
+xcom_validados() {
+  # xcom_validados <run_id>: categorias distintas e quantidade de produtos aprovados.
+  admin_sql airflow "SELECT (SELECT string_agg(DISTINCT p->>'codigo_categoria', ',' ORDER BY p->>'codigo_categoria')
+      FROM jsonb_array_elements(x.value->'produtos') p) || '|' || jsonb_array_length(x.value->'produtos')
+    FROM xcom_v2 x JOIN task_instance ti ON ti.id = x.task_instance_id
+    WHERE ti.dag_id = '$DAG_ID' AND ti.run_id = '$1' AND ti.task_id = '$VALIDAR' AND x.key = 'return_value'
+    ORDER BY ti.try_number DESC LIMIT 1"
+}
+
+# V1. Catálogo válido sem uma categoria observada antes (jewelery): aceito, só o que veio segue.
+verificar "V1 validação da coleta normal" "electronics,jewelery,men's clothing,women's clothing|6" "$(xcom_validados "$RUN_ID")"
+RUN_AUSENTE="e2e__categoria_ausente"
+fakestore '{"respostas": [{"catalogo": "sem_joias"}]}'
+airflow_cli dags trigger "$DAG_ID" --logical-date "2026-11-18T09:00:00+00:00" --run-id "$RUN_AUSENTE" >/dev/null 2>&1
+verificar "V1 run com categoria ausente" "success" "$(aguardar_run "$DAG_ID" "$RUN_AUSENTE")"
+verificar "V1 categoria ausente fica fora" "electronics,men's clothing,women's clothing|3" "$(xcom_validados "$RUN_AUSENTE")"
+
+# V2–V4. Catálogo vazio, preço inválido e categoria em branco: falha na validação, antes do cálculo.
+validacao_rejeita() {
+  # validacao_rejeita <cenário> <catálogo> <data lógica> <run_id> <motivo esperado no log>
+  fakestore "{\"respostas\": [{\"catalogo\": \"$2\"}]}"
+  airflow_cli dags trigger "$DAG_ID" --logical-date "$3" --run-id "$4" >/dev/null 2>&1
+  verificar "$1 run" "failed" "$(aguardar_run "$DAG_ID" "$4")"
+  verificar "$1 coleta ok, validação falha sem retentativa" "1:success|1:failed" "$(tentativas "$4" "$BUSCAR")|$(tentativas "$4" "$VALIDAR")"
+  verificar "$1 cálculo e publicação não executados" "upstream_failed,upstream_failed" "$(admin_sql airflow "
+SELECT string_agg(state, ',' ORDER BY task_id) FROM task_instance
+WHERE dag_id = '$DAG_ID' AND run_id = '$4' AND task_id IN ('analise.consolidar', 'publicacao.publicar')")"
+  verificar "$1 motivo e aviso no log" "1|1" "$(contar_log "$4" "$VALIDAR" 1 "$5")|$(contar_log "$4" "$VALIDAR" 1 "[SHOPBRASIL][FALHA] dag=$DAG_ID run=$4 task=$VALIDAR")"
+}
+validacao_rejeita "V2 catálogo vazio" vazio "2026-11-17T09:00:00+00:00" "e2e__catalogo_vazio" "Validação do catálogo: catálogo vazio"
+validacao_rejeita "V3 preço inválido" preco_invalido "2026-11-16T09:00:00+00:00" "e2e__preco_invalido" "Validação do catálogo: produto 2: preço do tipo boolean"
+validacao_rejeita "V4 categoria em branco" categoria_em_branco "2026-11-15T09:00:00+00:00" "e2e__categoria_em_branco" "Validação do catálogo: produto 3: categoria em branco"
 
 resumo

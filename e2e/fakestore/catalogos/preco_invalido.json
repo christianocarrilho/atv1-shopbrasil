@@ -1,0 +1,4 @@
+[
+  {"id": 1, "title": "Mochila Fjallraven", "price": 109.95, "category": "men's clothing"},
+  {"id": 2, "title": "Camiseta slim", "price": true, "category": "men's clothing"}
+]
