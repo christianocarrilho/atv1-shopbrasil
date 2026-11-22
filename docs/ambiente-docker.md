@@ -16,8 +16,9 @@ Este documento descreve o ambiente do [docker-compose.yml](../docker-compose.yml
 | `airflow-apiserver` | idem | Interface e API em `http://localhost:${AIRFLOW_API_PORT}` (padrão 8080, só em 127.0.0.1). |
 | `airflow-scheduler` | idem | Agenda e executa as tasks com LocalExecutor. |
 | `airflow-dag-processor` | idem | Lê os DAGs de `pipeline/dags`. |
+| `web` | `shopbrasil-web:local`, construída de [web/Dockerfile](../web/Dockerfile) sobre `python:3.12.16-slim` | Web/API da #9 em `http://localhost:${SHOPBRASIL_WEB_PORT}` (padrão 8000, só em 127.0.0.1), com a conta de leitura. Contrato HTTP em [web/README.md](../web/README.md#contrato-http--para-as-1921). |
 
-Ordem de subida: `postgres` saudável → `db-init` concluído → `airflow-init` concluído → api-server, scheduler e dag-processor. Um erro de SQL no `db-init` impede a subida do Airflow.
+Ordem de subida: `postgres` saudável → `db-init` concluído → `airflow-init` concluído → api-server, scheduler e dag-processor. A `web` depende só de `postgres` saudável e `db-init` concluído; o Airflow não depende dela. Um erro de SQL no `db-init` impede a subida do Airflow e da web.
 
 O LocalExecutor dispensa Redis e workers Celery. O triggerer ficou de fora porque nenhuma task usa operadores adiáveis. A imagem do Airflow não recebe pacotes adicionais. Os DAGs ficam em `/opt/airflow/dags` e o pacote `shopbrasil_pipeline` fica em `/opt/airflow/pipeline`, que está no `PYTHONPATH`.
 
@@ -31,6 +32,7 @@ O [.env.example](../.env.example) lista todas as variáveis. O Compose falha com
 | `SHOPBRASIL_DB_HOST`, `SHOPBRASIL_DB_PORT`, `SHOPBRASIL_DB_NAME` | Endereço do banco analítico visto pelos contêineres (`postgres`, `5432`, `shopbrasil`). |
 | `SHOPBRASIL_DB_WRITER_USER`, `SHOPBRASIL_DB_WRITER_PASSWORD` | Conta de escrita do pipeline, usada pela Connection. |
 | `SHOPBRASIL_DB_READER_USER`, `SHOPBRASIL_DB_READER_PASSWORD` | Conta de leitura da Web/API. Não entra nos contêineres do Airflow. |
+| `SHOPBRASIL_WEB_PORT` | Porta da Web/API no host, publicada só em 127.0.0.1 (padrão 8000). |
 | `AIRFLOW_DB_NAME`, `AIRFLOW_DB_USER`, `AIRFLOW_DB_PASSWORD` | Banco e conta de metadados do Airflow. |
 | `AIRFLOW_JWT_SECRET` | Segredo comum aos processos do Airflow 3 para os tokens da Execution API. |
 | `AIRFLOW_FERNET_KEY` | Opcional. Cifra Connections e Variables gravadas no banco de metadados. |
@@ -59,13 +61,14 @@ Os privilégios padrão (`ALTER DEFAULT PRIVILEGES FOR ROLE <administrativa> IN 
 ## Coordenação com a #3 e com a Web/API
 
 - **#3**: o DDL está em [db/schema.sql](../db/schema.sql), idempotente e no esquema `public`, e o [modelo de dados](modelo-dados.md) descreve as tabelas. O `db-init` aplica o arquivo com a conta administrativa, `ON_ERROR_STOP=1` e `--single-transaction`, depois de `db/acessos.sql`. Sem o arquivo, o `db-init` registra `AVISO /db/schema.sql não encontrado` e conclui. O cenário E2E da #2 verifica os privilégios de todas as tabelas de `public` e cobre as tabelas da #3; o cenário `e2e/esquema` cobre o DDL.
-- **Web/API (#9)**: acrescente ao Compose um serviço próprio, construído a partir de `web/`, que dependa do `db-init` concluído e receba apenas `SHOPBRASIL_DB_HOST`, `SHOPBRASIL_DB_PORT`, `SHOPBRASIL_DB_NAME` e as variáveis `SHOPBRASIL_DB_READER_*`. O Airflow não depende desse serviço.
+- **Web/API (#9)**: o serviço `web` é construído a partir de `web/`, depende do `db-init` concluído e recebe apenas `SHOPBRASIL_DB_HOST`, `SHOPBRASIL_DB_PORT`, `SHOPBRASIL_DB_NAME` e as variáveis `SHOPBRASIL_DB_READER_*`. A conta de escrita e a administrativa não entram no contêiner, e o repositório abre transações somente leitura. O Airflow não depende desse serviço.
 
 ## Comandos
 
 ```sh
 cp .env.example .env                                   # preencher as senhas
-docker compose up -d --wait                            # postgres → db-init → Airflow
+docker compose up -d --build --wait                    # postgres → db-init → Airflow e web
+curl -s http://localhost:8000/api/metricas/ultima-data # Web/API com a conta de leitura
 docker compose ps -a                                   # db-init e airflow-init com código 0
 docker compose run --rm db-init                        # reaplica acessos e db/schema.sql
 docker compose exec airflow-scheduler airflow pools get ecommerce_pool
@@ -80,4 +83,4 @@ Os DAGs entram pausados (`DAGS_ARE_PAUSED_AT_CREATION=true`). Despause o DAG do 
 
 ## Cenário E2E
 
-`e2e/ambiente/executar.sh` sobe um projeto Compose isolado, com senhas aleatórias e volumes próprios, e remove tudo ao final. Os resultados estão em [evidencias.md](evidencias.md#2--ambiente-docker-connection-e-pool).
+`e2e/ambiente/executar.sh` sobe um projeto Compose isolado, com senhas aleatórias e volumes próprios, e remove tudo ao final. Os resultados estão em [evidencias.md](evidencias.md#2--ambiente-docker-connection-e-pool). O serviço `web` é coberto por `e2e/web/executar.sh` ([evidências da #9](evidencias.md#9--consultas-webapi-para-snapshot-e-evolução)).

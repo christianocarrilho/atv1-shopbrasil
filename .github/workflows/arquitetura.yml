@@ -1,8 +1,9 @@
 # Autor: Christiano Henrique Carrilho Lopes da Silva
 # Código de pessoa: 1691353
 # Matrícula: 262987
-# Executa o lint de arquitetura (#26), seus testes e os testes unitários do pipeline
-# (só biblioteca padrão) em cada PR e push na main.
+# Executa o lint de arquitetura (#26), seus testes e os testes unitários do pipeline e das
+# consultas da web (só biblioteca padrão) em cada PR e push na main. Os testes da web que
+# precisam de FastAPI e psycopg são pulados aqui e rodam no contêiner da web.
 # Usa um Python próprio do CI porque o lint depende só da biblioteca padrão e
 # não deve acoplar às versões de runtime definidas na #1.
 name: Arquitetura
@@ -10,7 +11,7 @@ name: Arquitetura
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, integracao-backlog]
 
 permissions:
   contents: read
@@ -29,3 +30,5 @@ jobs:
         run: python qualidade/lint_arquitetura.py --listar
       - name: Testes unitários do pipeline
         run: python -m unittest discover -s pipeline/tests -t pipeline -v
+      - name: Testes unitários da web (consultas)
+        run: python -m unittest discover -s web/tests -t web -v

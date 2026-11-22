@@ -51,24 +51,35 @@ Consulte a [especificação da ShopBrasil](docs/especificacao.md) para o modelo 
 - Na #23, use Airflow e PostgreSQL reais em Docker, com dados isolados e respostas controladas no limite HTTP da FakeStore. Cubra execução normal, agendamento, callbacks, retry e falha definitiva, catálogo vazio e inválido, categorias novas e ausentes, limite de concorrência, XCom pequeno, reprocessamento, rollback, API e painel. Documente um comando para rodar a suíte e registre os resultados por cenário.
 - Na #12, documente a inicialização dos módulos e o reprocessamento, confira o acesso de leitura para o avaliador e prepare a postagem do link no canal da atividade.
 
-- Abra uma branch por issue a partir de `main` atualizada. Revise a alteração antes de abrir o PR para `main`. Após aprovação e verificações aplicáveis, faça o merge e encerre a issue. Use `main` como única branch permanente.
+- Siga o fluxo de integração definido em [Fluxo de integração do backlog](#fluxo-de-integração-do-backlog). `main` continua sendo a única branch permanente.
 - Reúna comandos, resultados observados, evidências e links em `docs/evidencias.md`. O autor compartilhará com o professor o link do repositório e o do documento.
+
+## Fluxo de integração do backlog
+
+Decisão do autor em 22 nov. 2026, válida a partir de `main` 78ed846: as issues restantes são implementadas primeiro e entram em `main` por um único PR, depois da suíte completa e da fase de correções. As issues #1, #2, #3, #4, #15, #24, #26, #27 e #29 já entraram em `main` pelo fluxo anterior, um PR por issue.
+
+- A branch temporária `integracao-backlog`, criada a partir de `main`, reúne as entregas. Não faça merge individual em `main`.
+- Abra uma branch por issue a partir da `integracao-backlog` atualizada, com o número da issue no nome (`issue-<N>-<assunto>`). Abra o PR da issue para `integracao-backlog`, com `Refs #N` no corpo, e integre-o com merge commit para preservar os commits da issue. PRs abertos antes desta decisão para `main` são redirecionados para `integracao-backlog`.
+- Durante a implementação, cada PR de issue passa pelo lint de arquitetura, pelos testes unitários e pela revisão cruzada. Acrescente ou atualize no mesmo PR o cenário E2E aplicável e execute verificações rápidas. A execução completa da suíte não bloqueia cada issue.
+- Quando todas as issues restantes estiverem integradas, abra um único PR de `integracao-backlog` para `main`. O corpo traz `Closes #N` para cada issue entregue, incluindo as agregadoras cujas filhas estejam validadas, e uma tabela issue → commits/PR de issue que garante a rastreabilidade.
+- Sobre a revisão final desse PR, execute a suíte E2E completa e o lint. Corrija os achados em commits que citem a issue afetada e registre comandos e resultados em `docs/evidencias.md`. O merge em `main` só ocorre depois das correções e das validações.
+- As issues ficam abertas até o merge do PR final. Confirme o fechamento de cada uma depois dele.
 
 ## Critérios obrigatórios de revisão e merge
 
-- Antes de editar, leia este arquivo, a especificação e a issue, incluindo seus critérios de aceite e dependências. Mantenha o escopo da issue. Se encontrar conflito entre instruções ou precisar alterar um contrato aprovado, registre a divergência para o Codex resolver antes de implementar a parte afetada.
-- Atribua toda nova issue a `christianocarrilho`. Abra uma branch por issue a partir de `main` atualizada. Para uma entrega individual, inclua `Closes #N` no PR para `main` e confirme o fechamento da issue após o merge. Use apenas uma referência à issue agregadora até que todas as sub-issues estejam integradas e o conjunto validado.
-- Aplique a revisão cruzada definida acima. O Codex faz a revisão final, confere escopo, cabeçalhos, contratos, arquitetura e evidências e integra somente após resolver os achados e passar nas verificações aplicáveis.
+- Antes de editar, leia este arquivo, a especificação e a issue, incluindo seus critérios de aceite e dependências. Mantenha o escopo da issue. Se encontrar conflito entre instruções ou precisar alterar um contrato aprovado, registre a divergência para o coordenador resolver antes de implementar a parte afetada.
+- Atribua toda nova issue a `christianocarrilho`. Use apenas uma referência à issue agregadora até que todas as sub-issues estejam integradas e o conjunto validado.
+- Aplique a revisão cruzada definida acima. A revisão final cabe ao coordenador da integração, papel do Codex e, por decisão do autor, assumido pelo Claude nesta fase. Ela confere escopo, cabeçalhos, contratos, arquitetura e evidências. O coordenador integra somente depois de resolver os achados e de passar nas verificações aplicáveis.
 
 ## Lint de arquitetura
 
 - No Pipeline, `dominio` usa apenas a biblioteca padrão. `aplicacao` usa seu próprio código e `dominio`, sem acoplar a Airflow, HTTP, PostgreSQL ou adaptadores concretos. `infraestrutura` pode usar os contratos da aplicação e os tipos do domínio. O DAG aciona casos de uso e a composição. Restrinja a ligação com adaptadores concretos ao ponto de composição.
 - Na Web/API, `apresentacao` usa os casos de uso e modelos de `consultas`, sem acessar `infraestrutura` diretamente. `consultas` define seus modelos de leitura e contratos sem depender de HTTP ou PostgreSQL. `infraestrutura` implementa esses contratos. A composição é o ponto que conecta apresentação, consultas e adaptadores.
 - Proíba imports entre `pipeline/` e `web/` nos dois sentidos. O esquema em `db/` é o contrato entre eles. O lint da #26 deve verificar imports absolutos e relativos e falhar com diagnóstico acionável em caso de violação; cubra o resultado com exemplos permitidos e proibidos.
-- Execute o comando versionado do lint de arquitetura em cada PR que altere código ou regras de dependência e registre o resultado no PR. PR de código sujeito às regras só entra em `main` depois que a checagem estiver disponível e passar. Não silencie violações nem amplie permissões para passar no lint. A revisão também verifica responsabilidades que imports não revelam, como SQL no DAG ou no controller.
+- Execute o comando versionado do lint de arquitetura em cada PR que altere código ou regras de dependência e registre o resultado no PR. PR de código sujeito às regras só entra em `integracao-backlog` ou em `main` depois que a checagem estiver disponível e passar. Não silencie violações nem amplie permissões para passar no lint. A revisão também verifica responsabilidades que imports não revelam, como SQL no DAG ou no controller.
 
 ## E2E por entrega
 
 - Para cada issue funcional ou técnica com comportamento observável de ponta a ponta, acrescente ao mesmo PR um cenário E2E para o comportamento novo ou alterado. Se um cenário existente já cobre o caso, atualize-o quando necessário e identifique-o no PR. Se não houver cenário aplicável, explique por quê no PR.
-- Antes do merge na `main`, execute o cenário novo ou atualizado e os cenários E2E afetados sobre a revisão final do PR. Registre no PR o comando, os cenários executados e o resultado observado. Falha ou ausência de execução aplicável bloqueia o merge.
+- Durante a implementação, registre no PR da issue as verificações rápidas executadas. Antes do merge do PR final em `main`, execute a suíte E2E completa sobre a revisão final e registre no PR e em `docs/evidencias.md` o comando, os cenários e o resultado observado. Falha ou ausência de execução aplicável bloqueia esse merge.
 - A #23 consolida a execução e a documentação da suíte. Inclua cobertura incremental em cada entrega aplicável; se faltar infraestrutura para executar o cenário, implemente o mínimo necessário ou integre primeiro a dependência que o viabiliza.

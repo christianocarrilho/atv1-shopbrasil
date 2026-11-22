@@ -1,0 +1,8 @@
+[
+  {"id": 1, "title": "Mochila Fjallraven", "price": 109.95, "description": "Mochila de uso diário", "category": "men's clothing", "image": "https://fakestoreapi.com/img/1.jpg", "rating": {"rate": 3.9, "count": 120}},
+  {"id": 2, "title": "Camiseta slim", "price": 22.3, "description": "Camiseta masculina", "category": "men's clothing", "image": "https://fakestoreapi.com/img/2.jpg", "rating": {"rate": 4.1, "count": 259}},
+  {"id": 5, "title": "Pulseira dragão", "price": 695, "description": "Pulseira de prata", "category": "jewelery", "image": "https://fakestoreapi.com/img/5.jpg", "rating": {"rate": 4.6, "count": 400}},
+  {"id": 9, "title": "HD externo 2TB", "price": 64, "description": "HD USB 3.0", "category": "electronics", "image": "https://fakestoreapi.com/img/9.jpg", "rating": {"rate": 3.3, "count": 203}},
+  {"id": 10, "title": "SSD 1TB", "price": 109, "description": "SSD SATA", "category": "electronics", "image": "https://fakestoreapi.com/img/10.jpg", "rating": {"rate": 2.9, "count": 470}},
+  {"id": 18, "title": "Blusa feminina", "price": 9.85, "description": "Blusa de manga curta", "category": "women's clothing", "image": "https://fakestoreapi.com/img/18.jpg", "rating": {"rate": 4.7, "count": 130}}
+]

@@ -1,0 +1,5 @@
+[
+  {"id": 1, "title": "Mochila Fjallraven", "price": 109.95, "description": "Mochila de uso diário", "category": "men's clothing"},
+  {"id": 9, "title": "HD externo 2TB", "price": 64, "description": "HD USB 3.0", "category": "electronics"},
+  {"id": 18, "title": "Blusa feminina", "price": 9.85, "description": "Blusa de manga curta", "category": "women's clothing"}
+]

@@ -18,7 +18,7 @@ LOG_DIR=""
 
 limpar() {
   if [[ "${E2E_MANTER:-0}" == 1 ]]; then
-    echo "Projeto mantido: $PROJECT (env em $ENV_FILE, logs em $LOG_DIR)"
+    echo "Projeto mantido (API do Airflow em 127.0.0.1:$AIRFLOW_API_PORT_E2E): $PROJECT (env em $ENV_FILE, logs em $LOG_DIR)"
     return
   fi
   [[ -n "$ENV_FILE" ]] && dc down -v --remove-orphans >/dev/null 2>&1
@@ -32,6 +32,23 @@ trap limpar EXIT
 TMP_BASE="${TMPDIR:-/tmp}"
 ENV_FILE="$(mktemp "${TMP_BASE%/}/shopbrasil-e2e-env.XXXXXX")"
 LOG_DIR="$(mktemp -d "${TMP_BASE%/}/shopbrasil-e2e-logs.XXXXXX")"
+
+porta_livre() {
+  # porta_livre <inicial>: primeira porta TCP local livre a partir da inicial, para execuções em paralelo.
+  python3 - "$1" <<'PY'
+import socket, sys
+porta = int(sys.argv[1])
+while True:
+    with socket.socket() as s:
+        try:
+            s.bind(("127.0.0.1", porta))
+            break
+        except OSError:
+            porta += 1
+print(porta)
+PY
+}
+AIRFLOW_API_PORT_E2E="${E2E_AIRFLOW_API_PORT:-$(porta_livre "${E2E_PORTA_PADRAO:-18090}")}"
 
 segredo() { openssl rand -hex 16; }
 WRITER_PASSWORD="$(segredo)"
@@ -56,7 +73,7 @@ AIRFLOW_JWT_SECRET=$(openssl rand -hex 32)
 AIRFLOW_FERNET_KEY=
 AIRFLOW_ADMIN_USER=admin
 AIRFLOW_ADMIN_PASSWORD=$(segredo)
-AIRFLOW_API_PORT=${E2E_AIRFLOW_API_PORT:-${E2E_PORTA_PADRAO:-18090}}
+AIRFLOW_API_PORT=${AIRFLOW_API_PORT_E2E}
 AIRFLOW_UID=50000
 ENV
 
