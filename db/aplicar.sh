@@ -35,9 +35,9 @@ psql_admin -d postgres \
   -v reader_password="${SHOPBRASIL_DB_READER_PASSWORD:?SHOPBRASIL_DB_READER_PASSWORD ausente}" \
   -f /db/acessos.sql
 
-# Enquanto a #3 não entregar o DDL, o arquivo pode não existir. Com o arquivo presente,
-# qualquer erro de DDL interrompe o db-init.
-if [ --single-transaction -f "$SCHEMA_FILE" ]; then
+# O esquema roda em uma única transação: um erro de DDL desfaz o arquivo inteiro e
+# interrompe o db-init. Sem o arquivo, o db-init apenas avisa.
+if [ -f "$SCHEMA_FILE" ]; then
   echo "db-init: aplicando $SCHEMA_FILE em $SHOPBRASIL_DB_NAME"
   psql_admin -d "$SHOPBRASIL_DB_NAME" --single-transaction -f "$SCHEMA_FILE"
 else

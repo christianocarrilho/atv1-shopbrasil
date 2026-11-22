@@ -70,3 +70,26 @@ Verificação complementar do Compose sem o override E2E, com um `.env` derivado
 Lint de arquitetura sobre o mesmo patch, com Python 3.14.7: `python3 qualidade/lint_arquitetura.py --listar` retornou `OK: 0 arquivo(s) Python verificado(s), nenhuma violação de arquitetura.` e saída 0; `python3 -m unittest discover -s qualidade/tests` retornou `Ran 38 tests ... OK`. O DAG de sonda fica em `e2e/`, fora do escopo do lint, porque usa `PostgresHook` diretamente para testar a Connection.
 
 Na revisão final, `e2e/ambiente/executar.sh` passou as 29 verificações. O A7 conferiu os quatro privilégios do escritor separadamente; A2 e A10 subiram apenas os serviços do Airflow e suas dependências.
+
+## #3 — Esquema analítico
+
+Validação executada em 22 nov. 2026, com Docker 29.9.2 e Docker Compose v5.6.1, sobre a base `main` 9e395db com o patch da #3. O DDL está em [db/schema.sql](../db/schema.sql) e o modelo em [modelo-dados.md](modelo-dados.md).
+
+Correção no `db-init`: a condição `[ --single-transaction -f "$SCHEMA_FILE" ]` de `db/aplicar.sh` terminava com `unexpected operator` e caía no aviso de arquivo ausente, sem aplicar o esquema. A condição passou a ser `[ -f "$SCHEMA_FILE" ]`; o `--single-transaction` continua no `psql`. Com o `db/aplicar.sh` anterior, o cenário do esquema falha em E1 com `AVISO /db/schema.sql não encontrado`.
+
+Comando: `e2e/esquema/executar.sh`. Ele sobe só `postgres` e `db-init` no projeto Compose `shopbrasil-e2e-esquema-<timestamp>`, com senhas aleatórias, e remove contêineres e volumes ao final. Duração observada: cerca de 10 s. Código de saída 0, 36 verificações PASS.
+
+| Cenário | Resultado | Observado |
+|---|---|---|
+| E1 aplicação em banco vazio | PASS | banco `shopbrasil` inexistente antes do `db-init`; `db-init` com código 0 e `aplicando /db/schema.sql em shopbrasil`; apenas `categoria`, `metricas_categoria` e `metricas_categoria_historico` em `public`, donas da conta administrativa |
+| E2 colunas e tipos | PASS | 17 colunas `NOT NULL`; `id` `integer` identity `ALWAYS`; preços `numeric(12,2)`; `quantidade_produtos` `integer`; `data_referencia` e `data_execucao` `date` |
+| E3 chaves e FKs | PASS | PK `categoria(id)` e `UNIQUE (codigo)`; PK `metricas_categoria(id)` e `UNIQUE (data_referencia, categoria_id)`; PK `metricas_categoria_historico(run_id, categoria_id)`; duas FKs para `categoria(id)` com `ON DELETE RESTRICT` |
+| E4 categoria | PASS | ids 1 e 2 gerados; id manual recusado (`cannot insert a non-DEFAULT value into column "id"`); código duplicado e código vazio recusados; `ON CONFLICT (codigo) DO NOTHING` sem nova linha |
+| E5 snapshot diário | PASS | exemplo da #15 lido pela conta de leitura como `10.00`, `10.00`, `10.01`, `3`; limite `9999999999.99` aceito; data e categoria duplicadas, FK inexistente, métrica nula, `numeric field overflow`, mínimo acima da média e quantidade zero recusados; `10.005`, `0.125` e `10.004` arredondados pelo tipo para `10.01`, `0.13` e `10.00`; tipos `numeric`, `integer` e `date` no cliente |
+| E6 histórico por run | PASS | run e categoria duplicadas recusadas; `ON CONFLICT DO NOTHING` na mesma run preservou `10.00` e `3`; runs distintas acrescentaram linhas; FK inexistente, `run_id` vazio e máximo abaixo da média recusados; remoção de categoria referenciada recusada por `RESTRICT`; leitor sem `INSERT` |
+| E7 reaplicação do `db-init` | PASS | código 0 com 3 avisos `already exists, skipping`; colunas, restrições, md5 dos dados e contagens 2/3/3 iguais; identity continuou (novo id 6, máximo anterior 2) |
+| E8 transação | PASS | `BEGIN` + `schema.sql` + `ROLLBACK` não deixou tabelas, então o arquivo não tem `COMMIT` próprio; `db-init` com o esquema real seguido de erro terminou com código 3 e `syntax error` e não criou tabelas; o banco analítico ficou com 3/3/3 linhas |
+
+Cenário de ambiente afetado, `e2e/ambiente/executar.sh`, sobre o mesmo patch: 29 verificações PASS, código de saída 0, cerca de 1 min. Com `db/schema.sql` presente, A6 registrou `aplicado`, A7 conferiu 0 violações em 4 tabelas de `public` (as três da #3 e a sonda) e A11 reaplicou o `db-init` com código 0 e 4 avisos `already exists`.
+
+Lint de arquitetura sobre o mesmo patch, com Python 3.14.7: `python3 qualidade/lint_arquitetura.py --listar` retornou `OK: 0 arquivo(s) Python verificado(s), nenhuma violação de arquitetura.` e saída 0; `python3 -m unittest discover -s qualidade/tests` retornou `Ran 38 tests ... OK`. O patch não tem código Python.
