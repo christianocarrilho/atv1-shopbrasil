@@ -14,6 +14,21 @@ A data de referência é a data civil, em Brasília, da data lógica da run. No 
 
 Para reprocessar, limpe as tasks da própria run (na interface, *Clear*, ou `airflow tasks clear shopbrasil_metricas -s <data lógica> -e <data lógica> -y`). O `run_id` e a data de referência são preservados. Não dispare uma run nova para refazer um dia.
 
+## Buscar Produtos — #13
+
+A task `ingestao.buscar_produtos` chama o caso de uso `coletar_catalogo` (`aplicacao/catalogo.py`) com a fonte obtida em `composicao.py`. O adaptador `infraestrutura/fakestore.py` consulta `GET {FAKESTORE_BASE_URL}/products` com timeout de 15 segundos e `User-Agent: shopbrasil-pipeline/1.0`, porque a FakeStore real responde 403 ao `Python-urllib` padrão, e lê o JSON com `parse_float`, `parse_int` e `parse_constant` em `Decimal`. Erros HTTP, de conexão, de timeout e de JSON são registrados e relançados pela task.
+
+A task tem `retries=3`, `retry_delay` de 60 segundos e `retry_exponential_backoff=2.0`: até quatro tentativas. O Airflow 3.4 sorteia cada espera entre N e 2N, com N = 60 × 2^(n−1) segundos: a primeira fica entre 60 e 119 s, a segunda entre 120 e 239 s e a terceira entre 240 e 479 s. Sem `FAKESTORE_BASE_URL`, a task falha direto com `AirflowFailException`, sem gastar retentativas. A variável `SHOPBRASIL_BUSCA_RETRY_DELAY_SEGUNDOS` reduz o atraso só no override E2E.
+
+Interface entregue à #6 (XCom de `buscar_produtos`), uma projeção pequena que não valida nada:
+
+```json
+{"tipo_raiz": "array",
+ "produtos": [{"id": "5", "categoria": "jewelery", "tipo_categoria": "string", "preco": "695", "tipo_preco": "number"}]}
+```
+
+`categoria` só é preenchida quando o valor é texto, e `preco` só quando é número, como string decimal sem arredondamento. Nos demais casos o campo fica `null`, e `tipo_categoria` ou `tipo_preco` informa o tipo JSON recebido (`boolean`, `string`, `null`, `array`, `object` ou `ausente`). `tipo_raiz` diferente de `array` indica uma resposta que não é lista. Com isso, a #6 rejeita catálogo vazio, categoria em branco, booleano e texto no lugar do preço. `NaN` e `Infinity` chegam com `tipo_preco` `number` e `preco` `"NaN"` ou `"Infinity"`, então a #6 também confere se o preço é finito, e o preço chega à #15 sem passar por float.
+
 ## Testes
 
 ```bash
