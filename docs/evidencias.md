@@ -200,3 +200,35 @@ O cenário chama o caso de uso diretamente porque o DAG só passa a acionar a pu
 | Lint de arquitetura | `python3 qualidade/lint_arquitetura.py` | `OK: 15 arquivo(s) Python verificado(s), nenhuma violação de arquitetura.` |
 
 Revisão cruzada do Claude sobre 6e8763c: aprovado, sem bloqueantes. A transação é única: o bloco `with conexao` do psycopg2 faz commit ao sair e rollback em qualquer exceção. O conjunto do dia é apagado e reinserido. Coleção vazia e código repetido são recusados antes de abrir a transação. O ponto de extensão `etapas_adicionais` compartilha o cursor com a #18. A aplicação não tem SQL nem Airflow. Na integração com a #13 (b2f180c), as duas fábricas ficaram em `composicao.py`; o adaptador PostgreSQL é importado dentro da função, para que os testes unitários não dependam do provider. Sobre essa revisão: `e2e/publicacao/executar.sh` terminou com código 0 e 26 verificações PASS; testes unitários `OK`; lint `OK: 18 arquivo(s) Python verificado(s), nenhuma violação de arquitetura.`
+
+## #14 — Callbacks, aviso de falha e alerta simulado
+
+Validação executada em 22 nov. 2026, com Docker 29.9.2 e Docker Compose v5.6.1, sobre a revisão 1d297b1 (base `integracao-backlog` c7e5d74).
+
+Comando: `e2e/pipeline/executar.sh`. Código de saída 0 e 39 verificações PASS: as 32 da #4 e da #13 e as 7 da #14. Os callbacks gravam no log de cada tentativa (`/opt/airflow/logs/dag_id=.../run_id=.../task_id=.../attempt=N.log`).
+
+| Cenário | Resultado | Observado |
+|---|---|---|
+| C1 sucesso | PASS | `[SHOPBRASIL][SUCESSO] ... task=ingestao.buscar_produtos tentativa=1/4` na run normal |
+| C2 retry e recuperação | PASS | `[SHOPBRASIL][RETRY] ... tentativa=1/4 erro=HTTPError` na 1ª tentativa e `[SUCESSO]` na 2ª; nenhum alerta |
+| C3 falha definitiva | PASS | 3 linhas `[RETRY]` nas tentativas 1 a 3, `[FALHA] ... tentativa=4/4` e um único `[ALERTA SIMULADO]`, só na 4ª tentativa |
+| C4 falha de outra task | PASS | `[SHOPBRASIL][FALHA] ... task=preparacao.identificar tentativa=1/1 erro=OcorrenciaAusenteError` na run sem data lógica, sem alerta |
+
+Linhas reais da run `e2e__falha_persistente`:
+
+```text
+[SHOPBRASIL][RETRY] dag=shopbrasil_metricas run=e2e__falha_persistente task=ingestao.buscar_produtos tentativa=1/4 erro=HTTPError: HTTP Error 500: Internal Server Error
+[SHOPBRASIL][FALHA] dag=shopbrasil_metricas run=e2e__falha_persistente task=ingestao.buscar_produtos tentativa=4/4 erro=HTTPError: HTTP Error 500: Internal Server Error
+[SHOPBRASIL][ALERTA SIMULADO] destino=equipe-dados@shopbrasil.example assunto=ShopBrasil: ingestão da FakeStore falhou na run e2e__falha_persistente | Buscar Produtos esgotou 4 tentativa(s); a publicação da run não ocorreu. ...
+```
+
+Testes unitários: `Ran 54 tests ... OK`. Lint: `OK: 21 arquivo(s) Python verificado(s), nenhuma violação de arquitetura.`
+
+Revisão cruzada do Kiro sobre 1d297b1: aprovável com recomendações, sem bloqueantes. Ajustes em 30ddff2:
+- tentativa contada no ciclo atual, que continua correta depois de `tasks clear`;
+- falha sem retentativa (`AirflowFailException`) gera alerta "sem retentativa (erro não recuperável)", e não "esgotou";
+- `on_failure_callback` do DAG emite `[SHOPBRASIL][FALHA RUN]`, gravado no log do dag-processor;
+- C2 confirma que não há `[FALHA]` na recuperação;
+- texto procurado nos logs passado ao grep como argumento.
+
+Sobre 30ddff2, `e2e/pipeline/executar.sh` terminou com código 0 e 40 PASS, incluindo `C5 aviso de falha da run`: 1 linha `[FALHA RUN]` para `e2e__falha_persistente`. Testes unitários: `Ran 56 tests ... OK`.

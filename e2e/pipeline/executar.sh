@@ -9,6 +9,8 @@
 # Cobertura da #13: configuração de produção de Buscar Produtos, coleta pela FakeStore controlada
 # (e2e/fakestore) com XCom pequeno e preços decimais, falha transitória com retry e recuperação,
 # e falha persistente propagada após as tentativas, com backoff exponencial.
+# Cobertura da #14: callbacks de sucesso, retry e falha de Buscar Produtos, alerta simulado só na
+# falha definitiva da ingestão e aviso identificável na falha de outra task.
 # As issues seguintes do pipeline acrescentam seus cenários a este arquivo.
 #
 # Uso: e2e/pipeline/executar.sh
@@ -202,5 +204,45 @@ if [[ "$log_falha" =~ ^[0-9]+$ && "$log_falha" -ge 4 ]]; then
 else
   registrar FAIL "I4 exceção registrada e relançada" "registros: $log_falha"
 fi
+
+# ------------------------------------------------------------------------------- #14
+contar_log() {
+  # contar_log <run_id> <task_id> <tentativa|*> <texto>: linhas do log da task que contêm o texto.
+  # O texto vai como argumento posicional para não ser interpretado pelo shell do contêiner.
+  dc exec -T airflow-scheduler bash -c 'cat /opt/airflow/logs/dag_id='"$DAG_ID"'/run_id='"$1"'/task_id='"$2"'/attempt='"$3"'.log 2>/dev/null \
+    | grep -F -- "$1" | wc -l' _ "$4" | tr -d ' '
+}
+contar_log_geral() {
+  # contar_log_geral <texto>: linhas em todos os logs do Airflow, inclusive os do dag-processor.
+  dc exec -T airflow-scheduler bash -c 'grep -rF -- "$1" /opt/airflow/logs 2>/dev/null | wc -l' _ "$1" | tr -d ' '
+}
+
+# C1. Sucesso de Buscar Produtos na run normal (P4), na própria tentativa.
+verificar "C1 callback de sucesso" "1" "$(contar_log "$RUN_ID" "$BUSCAR" 1 "[SHOPBRASIL][SUCESSO] dag=$DAG_ID run=$RUN_ID task=$BUSCAR tentativa=1/4")"
+
+# C2. Retry na falha transitória (I3): aviso na 1ª tentativa e sucesso na 2ª.
+verificar "C2 callback de retry" "1|1" "$(contar_log "$RUN_RETRY" "$BUSCAR" 1 "[SHOPBRASIL][RETRY] dag=$DAG_ID run=$RUN_RETRY task=$BUSCAR tentativa=1/4 erro=HTTPError")|$(contar_log "$RUN_RETRY" "$BUSCAR" 2 "[SHOPBRASIL][SUCESSO]")"
+verificar "C2 sem aviso de falha nem alerta na recuperação" "0|0" "$(contar_log "$RUN_RETRY" "$BUSCAR" '*' "[SHOPBRASIL][FALHA]")|$(contar_log "$RUN_RETRY" "$BUSCAR" '*' "[ALERTA SIMULADO]")"
+
+# C3. Falha definitiva (I4): três retries, falha na 4ª tentativa e um único alerta simulado.
+retries_c3=0
+for tentativa in 1 2 3; do
+  retries_c3=$((retries_c3 + $(contar_log "$RUN_FALHA" "$BUSCAR" "$tentativa" "[SHOPBRASIL][RETRY] dag=$DAG_ID run=$RUN_FALHA task=$BUSCAR tentativa=$tentativa/4")))
+done
+verificar "C3 callbacks de retry nas três primeiras tentativas" "3" "$retries_c3"
+verificar "C3 callback de falha na 4ª tentativa" "1" "$(contar_log "$RUN_FALHA" "$BUSCAR" 4 "[SHOPBRASIL][FALHA] dag=$DAG_ID run=$RUN_FALHA task=$BUSCAR tentativa=4/4")"
+verificar "C3 alerta simulado na falha definitiva" "1|0" "$(contar_log "$RUN_FALHA" "$BUSCAR" 4 "[SHOPBRASIL][ALERTA SIMULADO] destino=")|$(contar_log "$RUN_FALHA" "$BUSCAR" '[123]' "[ALERTA SIMULADO]")"
+
+# C5. Falha da run inteira: callback do DAG, executado pelo dag-processor.
+falha_run=""
+for _ in $(seq 1 20); do
+  falha_run="$(contar_log_geral "[SHOPBRASIL][FALHA RUN] dag=$DAG_ID run=$RUN_FALHA")"
+  [[ "$falha_run" =~ ^[1-9] ]] && break
+  sleep 3
+done
+if [[ "$falha_run" =~ ^[1-9] ]]; then registrar PASS "C5 aviso de falha da run" "$falha_run linha(s) [FALHA RUN] para $RUN_FALHA"; else registrar FAIL "C5 aviso de falha da run" "linhas: $falha_run"; fi
+
+# C4. Outra falha do pipeline (P6, sem data lógica): aviso identificável, sem alerta da ingestão.
+verificar "C4 aviso em falha de outra task" "1|0" "$(contar_log "$SEM_DATA" "preparacao.identificar" '*' "[SHOPBRASIL][FALHA] dag=$DAG_ID run=$SEM_DATA task=preparacao.identificar")|$(contar_log "$SEM_DATA" "preparacao.identificar" '*' "[ALERTA SIMULADO]")"
 
 resumo
