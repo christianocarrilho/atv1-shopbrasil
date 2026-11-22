@@ -232,3 +232,26 @@ Revisão cruzada do Kiro sobre 1d297b1: aprovável com recomendações, sem bloq
 - texto procurado nos logs passado ao grep como argumento.
 
 Sobre 30ddff2, `e2e/pipeline/executar.sh` terminou com código 0 e 40 PASS, incluindo `C5 aviso de falha da run`: 1 linha `[FALHA RUN]` para `e2e__falha_persistente`. Testes unitários: `Ran 56 tests ... OK`.
+
+## #6 — ValidarProdutosOperator
+
+Validação executada em 22 nov. 2026, com Docker 29.9.2 e Docker Compose v5.6.1, sobre a revisão 2221b50 (base `integracao-backlog` 455860c). As regras ficam em `pipeline/shopbrasil_pipeline/aplicacao/validacao.py`, e o operador em `pipeline/dags/operadores/validar_produtos.py`.
+
+Comando: `e2e/pipeline/executar.sh`, com os catálogos controlados `sem_joias`, `vazio`, `preco_invalido` e `categoria_em_branco` em `e2e/fakestore/catalogos/`. Código de saída 0 e 55 verificações PASS, incluindo as 15 da #6.
+
+| Cenário | Resultado | Observado |
+|---|---|---|
+| P2 estrutura | PASS | aresta linear `ingestao.buscar_produtos>ingestao.validar_produtos>analise.consolidar` |
+| V1 coleta normal | PASS | XCom do operador com `electronics,jewelery,men's clothing,women's clothing` e 6 produtos (`codigo_categoria`, `preco`) |
+| V1 categoria ausente | PASS | catálogo sem `jewelery` aceito; run `success`; 3 categorias e 3 produtos |
+| V2 catálogo vazio | PASS | run `failed`; coleta `1:success`, validação `1:failed` sem retentativa; análise e publicação `upstream_failed`; log `Validação do catálogo: catálogo vazio` e aviso `[SHOPBRASIL][FALHA] ... task=ingestao.validar_produtos` |
+| V3 preço inválido | PASS | mesmo comportamento; log `Validação do catálogo: produto 2: preço do tipo boolean` |
+| V4 categoria em branco | PASS | mesmo comportamento; log `Validação do catálogo: produto 3: categoria em branco` |
+
+A preservação do snapshot publicado nas rejeições é conferida no banco a partir da #16, quando a publicação passa a ser chamada pelo DAG. Até a #6, a publicação nem chega a ser executada (`upstream_failed`).
+
+Testes unitários: `Ran 62 tests ... OK`. Cobrem catálogo válido sem arredondamento, categoria ausente, vazio, raiz que não é lista, categoria em branco, nula, numérica ou ausente, preço booleano, texto, nulo, negativo, lista ou `NaN`, e a lista de todos os motivos. Lint: `OK: 25 arquivo(s) Python verificado(s), nenhuma violação de arquitetura.`
+
+Ajustes descobertos na verificação:
+- Importar `AirflowFailException` de `airflow.sdk.exceptions`, porque o caminho antigo está depreciado no 3.4.
+- As consultas ad hoc ao DagBag no E2E usam o `PYTHONPATH` dos processos do Airflow, que inclui a pasta de DAGs.
