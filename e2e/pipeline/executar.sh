@@ -9,9 +9,10 @@
 # As issues seguintes do pipeline acrescentam seus cenários a este arquivo.
 #
 # Uso: e2e/pipeline/executar.sh
-# Variáveis opcionais: E2E_AIRFLOW_API_PORT (padrão 18080) e E2E_MANTER=1 (não remove o projeto).
+# Variáveis opcionais: E2E_AIRFLOW_API_PORT (padrão 18090) e E2E_MANTER=1 (não remove o projeto).
 
 E2E_NOME=pipeline
+E2E_PORTA_PADRAO=18090
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/comum.sh"
 
 DAG_ID="shopbrasil_metricas"
@@ -51,7 +52,8 @@ PY
 verificar "P3 start_date, fuso e catchup" "2026-11-01T03:00:00+00:00|America/Sao_Paulo|catchup=False" "$config_dag"
 airflow_cli dags unpause "$DAG_ID" >/dev/null 2>&1
 # Com catchup=False, o Airflow 3.4 cria só a run da ocorrência das 06:00 mais recente, sem as
-# retroativas desde o start_date.
+# retroativas desde o start_date. A ocorrência esperada vem do relógio do PostgreSQL: não rode o
+# cenário atravessando 06:00 de Brasília, quando o scheduler criaria uma segunda run agendada.
 ULTIMA_SQL="(SELECT (CASE WHEN (now() AT TIME ZONE 'America/Sao_Paulo')::time >= '06:00'
   THEN (now() AT TIME ZONE 'America/Sao_Paulo')::date ELSE (now() AT TIME ZONE 'America/Sao_Paulo')::date - 1 END))"
 AGENDADA=""
@@ -75,11 +77,14 @@ verificar "P3 próxima ocorrência às 06:00 de Brasília, no dia seguinte à ag
 airflow_cli dags trigger "$DAG_ID" --logical-date "$OCORRENCIA" --run-id "$RUN_ID" >/dev/null 2>&1
 verificar "P4 run da ocorrência" "success" "$(aguardar_run "$DAG_ID" "$RUN_ID")"
 # No Airflow 3.4 cada tentativa é uma linha de task_instance e o XCom fica em xcom_v2.
+# xcom_execucao [run_id] [tentativa]: XCom de preparacao.identificar; sem tentativa, a mais recente.
 xcom_execucao() {
+  local filtro_tentativa=""
+  [[ -n "${2:-}" ]] && filtro_tentativa="AND ti.try_number = $2"
   admin_sql airflow "SELECT x.value->>'run_id' || '|' || (x.value->>'data_referencia')
     FROM xcom_v2 x JOIN task_instance ti ON ti.id = x.task_instance_id
     WHERE ti.dag_id = '$DAG_ID' AND ti.run_id = '${1:-$RUN_ID}' AND ti.task_id = 'preparacao.identificar'
-      AND x.key = 'return_value' ORDER BY ti.try_number DESC LIMIT 1"
+      AND x.key = 'return_value' $filtro_tentativa ORDER BY ti.try_number DESC LIMIT 1"
 }
 verificar "P4 data de referência da ocorrência" "$RUN_ID|2026-11-21" "$(xcom_execucao)"
 verificar "P4 tasks da run" "4|4" "$(admin_sql airflow "
@@ -91,13 +96,14 @@ verificar "P4 data de referência da run agendada" "$AGENDADA|$(admin_sql airflo
 airflow_cli tasks clear "$DAG_ID" -s "$OCORRENCIA" -e "$OCORRENCIA" -y >/dev/null 2>&1
 sleep 3
 verificar "P5 run reprocessada" "success" "$(aguardar_run "$DAG_ID" "$RUN_ID")"
-verificar "P5 mesma run e data de referência original" "$RUN_ID|2026-11-21" "$(xcom_execucao)"
+verificar "P5 mesma run e data de referência original na 2ª tentativa" "$RUN_ID|2026-11-21" "$(xcom_execucao "$RUN_ID" 2)"
 verificar "P5 uma run, quatro tasks, segunda tentativa com sucesso" "1|4|4" "$(admin_sql airflow "
 SELECT (SELECT count(*) FROM dag_run WHERE dag_id = '$DAG_ID' AND logical_date = '$OCORRENCIA'),
        count(DISTINCT task_id), count(*) FILTER (WHERE try_number = 2 AND state = 'success')
 FROM task_instance WHERE dag_id = '$DAG_ID' AND run_id = '$RUN_ID'")"
 
-# P6. Run sem data lógica é rejeitada em vez de usar o relógio.
+# P6. Run sem data lógica é rejeitada em vez de usar o relógio. A CLI e a UI sempre preenchem a
+# data lógica, então o cenário usa trigger_dag do Airflow 3.4.0 (API interna, fixada pela #1).
 SEM_DATA="e2e__sem_data_logica"
 dc exec -T airflow-scheduler python - "$SEM_DATA" <<'PY' >"$LOG_DIR/sem-data.log" 2>&1
 import sys

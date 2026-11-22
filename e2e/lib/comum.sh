@@ -4,16 +4,34 @@
 # Matrícula: 262987
 # Funções compartilhadas pelos cenários E2E a partir da #4: projeto Compose isolado com senhas
 # aleatórias, psql pelas contas reais, registro de resultados e espera por runs do Airflow.
-# Cada cenário define E2E_NOME e E2E_COMPOSE_EXTRA (overrides opcionais) antes de carregar este arquivo.
+# Cada cenário define E2E_NOME e, se precisar, E2E_COMPOSE_EXTRA (overrides) e E2E_PORTA_PADRAO
+# (porta da API do Airflow, distinta por cenário para permitir execuções em paralelo).
 
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PROJECT="shopbrasil-e2e-${E2E_NOME:?defina E2E_NOME}-$(date +%s)"
-ENV_FILE="$(mktemp -t shopbrasil-e2e-env.XXXXXX)"
-LOG_DIR="$(mktemp -d -t shopbrasil-e2e-logs.XXXXXX)"
 FALHAS=0
 RESULTADOS=()
+ENV_FILE=""
+LOG_DIR=""
+
+limpar() {
+  if [[ "${E2E_MANTER:-0}" == 1 ]]; then
+    echo "Projeto mantido: $PROJECT (env em $ENV_FILE, logs em $LOG_DIR)"
+    return
+  fi
+  [[ -n "$ENV_FILE" ]] && dc down -v --remove-orphans >/dev/null 2>&1
+  rm -f "$ENV_FILE"
+  # Os logs ficam só quando algum cenário falhou, para diagnóstico.
+  if [[ $FALHAS -eq 0 && -n "$LOG_DIR" ]]; then rm -rf "$LOG_DIR"; fi
+}
+# O trap vem antes de criar os temporários para que uma interrupção não deixe senhas em disco.
+trap limpar EXIT
+
+TMP_BASE="${TMPDIR:-/tmp}"
+ENV_FILE="$(mktemp "${TMP_BASE%/}/shopbrasil-e2e-env.XXXXXX")"
+LOG_DIR="$(mktemp -d "${TMP_BASE%/}/shopbrasil-e2e-logs.XXXXXX")"
 
 segredo() { openssl rand -hex 16; }
 WRITER_PASSWORD="$(segredo)"
@@ -38,7 +56,7 @@ AIRFLOW_JWT_SECRET=$(openssl rand -hex 32)
 AIRFLOW_FERNET_KEY=
 AIRFLOW_ADMIN_USER=admin
 AIRFLOW_ADMIN_PASSWORD=$(segredo)
-AIRFLOW_API_PORT=${E2E_AIRFLOW_API_PORT:-18080}
+AIRFLOW_API_PORT=${E2E_AIRFLOW_API_PORT:-${E2E_PORTA_PADRAO:-18090}}
 AIRFLOW_UID=50000
 ENV
 
@@ -70,15 +88,6 @@ verificar() {
   if [[ "$3" == "$2" ]]; then registrar PASS "$1" "$3"; else registrar FAIL "$1" "esperado '$2', obtido '$3'"; fi
 }
 
-limpar() {
-  if [[ "${E2E_MANTER:-0}" == 1 ]]; then
-    echo "Projeto mantido: $PROJECT (env em $ENV_FILE, logs em $LOG_DIR)"
-    return
-  fi
-  dc down -v --remove-orphans >/dev/null 2>&1
-  rm -f "$ENV_FILE"
-}
-trap limpar EXIT
 
 subir_airflow() {
   # Sobe apenas o Airflow e suas dependências; a Web/API não participa do pipeline.

@@ -19,9 +19,11 @@ import pendulum
 from airflow.sdk import CronTriggerTimetable, dag, get_current_context, task, task_group
 
 from shopbrasil_pipeline.aplicacao.execucao import Execucao, identificar_execucao
+from shopbrasil_pipeline.dominio.calendario import FUSO_REFERENCIA
 
 DAG_ID = "shopbrasil_metricas"
-FUSO = "America/Sao_Paulo"
+# O fuso da agenda é o mesmo da regra da data de referência.
+FUSO = FUSO_REFERENCIA.key
 AGENDA_CRON = "0 6 * * *"
 # Primeira ocorrência considerada. Com catchup=False, o Airflow não cria runs atrasadas
 # entre esta data e a ativação do DAG.
