@@ -1,4 +1,4 @@
-"""Testes da página do painel (#19) e das barras de preço médio (#20).
+"""Testes da página do painel (#19), das barras (#20) e da linha de evolução (#21).
 
 Autor: Christiano Henrique Carrilho Lopes da Silva
 Código de pessoa: 1691353
@@ -64,8 +64,8 @@ def linhas_da_tabela(pagina: str) -> list[list[str]]:
     ]
 
 
-def dados_embutidos(pagina: str):
-    return json.loads(re.search(r'<script type="application/json" id="metricas-dados">(.*?)</script>', pagina, re.S).group(1))
+def dados_embutidos(pagina: str, ident: str = "metricas-dados"):
+    return json.loads(re.search(rf'<script type="application/json" id="{ident}">(.*?)</script>', pagina, re.S).group(1))
 
 
 @unittest.skipUnless(TEM_DEPENDENCIAS, "FastAPI, Jinja2 e psycopg ficam no contêiner da web")
@@ -156,6 +156,48 @@ class PaginaTest(unittest.TestCase):
         self.assertEqual(200, status)
         self.assertIn("javascript", tipo)
         self.assertIn("Chart.js v4.6.1", corpo[:200])
+
+
+    def test_evolucao_padrao_primeira_categoria_e_30_dias_ate_a_data(self) -> None:
+        _, _, pagina = obter(self.app, "/", data="2026-11-22")
+        serie = dados_embutidos(pagina, "evolucao-dados")
+        self.assertEqual(("electronics", "2026-10-24", "2026-11-22"),
+                         (serie["categoria"]["codigo"], serie["inicio"], serie["fim"]))
+        self.assertEqual(30, len(serie["pontos"]))
+        self.assertIn('<option value="electronics" selected>', pagina)
+        self.assertIn('id="inicio" name="inicio" form="filtro-data" value="2026-10-24"', pagina)
+        self.assertIn('<canvas id="grafico-evolucao"', pagina)
+
+    def test_evolucao_com_lacunas_igual_a_api(self) -> None:
+        from tests.test_apresentacao import chamar
+
+        filtros = {"categoria": "electronics", "inicio": "2026-11-20", "fim": "2026-11-23"}
+        _, _, pagina = obter(self.app, "/", **filtros)
+        serie = dados_embutidos(pagina, "evolucao-dados")
+        _, api = chamar(self.app, "/api/evolucao", **filtros)
+        self.assertEqual(api, serie)
+        # Lacuna é null, distinta de zero; cada ponto é o preço médio publicado no snapshot.
+        self.assertEqual([("2026-11-20", "20.00"), ("2026-11-21", None), ("2026-11-22", "10.00"), ("2026-11-23", None)],
+                         [(p["data"], p["preco_medio"]) for p in serie["pontos"]])
+        self.assertIn("spanGaps: false", pagina)
+
+    def test_evolucao_mantem_data_e_filtros_independentes(self) -> None:
+        _, _, pagina = obter(self.app, "/", data="2026-11-20", categoria="jewelery",
+                             inicio="2026-11-21", fim="2026-11-22")
+        self.assertEqual([["electronics", "20.00", "15.00", "25.00", "2"]], linhas_da_tabela(pagina))
+        serie = dados_embutidos(pagina, "evolucao-dados")
+        self.assertEqual(["2026-11-21", "2026-11-22"], [p["data"] for p in serie["pontos"]])
+        self.assertIn('<option value="jewelery" selected>', pagina)
+
+    def test_evolucao_filtro_invalido_vira_aviso(self) -> None:
+        status, _, pagina = obter(self.app, "/", categoria="electronics", inicio="2026-11-23", fim="2026-11-20")
+        self.assertEqual(200, status)
+        self.assertIn('id="evolucao-aviso">Intervalo inválido: início 2026-11-23 depois do fim 2026-11-20<', pagina)
+        self.assertIsNone(dados_embutidos(pagina, "evolucao-dados"))
+        _, _, pagina = obter(self.app, "/", categoria="toys")
+        self.assertIn("Categoria &#39;toys&#39; não cadastrada", pagina)
+        status, _, _ = obter(self.app, "/", inicio="2026-13-01")
+        self.assertEqual(422, status)
 
 
 if __name__ == "__main__":
