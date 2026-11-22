@@ -138,3 +138,36 @@ Observações do Airflow 3.4 usadas pelo cenário: cada tentativa é uma linha d
 Testes unitários na revisão final, já com os da #15: `python3 -m unittest discover -s pipeline/tests -t pipeline` retornou `Ran 30 tests ... OK`. Lint: `OK: 10 arquivo(s) Python verificado(s), nenhuma violação de arquitetura.`
 
 Revisão cruzada do Kiro sobre 9a957f0: aprovado com ajustes, sem bloqueantes; o Kiro também rodou o E2E com 19 PASS. Ajustes aplicados: `trap` registrado antes de criar o arquivo de senhas, logs removidos quando não há falha, `mktemp` com caminho completo no macOS, porta padrão própria do cenário (18090), P5 lendo o XCom da 2ª tentativa, fuso da agenda vindo do domínio e comentários sobre a API interna do P6 e a janela das 06:00. Mantido como está: runs manuais com data lógica arbitrária publicam para essa data; o README orienta a reprocessar limpando as tasks da run original. Na execução final, nenhum temporário `shopbrasil-e2e-*` ficou em `$TMPDIR`.
+
+## #13 — FakeStore em Buscar Produtos
+
+Validação executada em 22 nov. 2026, com Docker 29.9.2 e Docker Compose v5.6.1, sobre a revisão 768dac1 (base `main` 78ed846). A interface entregue à #6 está no [README do pipeline](../pipeline/README.md#buscar-produtos--13).
+
+Comando: `e2e/pipeline/executar.sh`, com a FakeStore controlada de `e2e/fakestore` (override `e2e/pipeline/compose.e2e.yml`). Código de saída 0 e 32 verificações PASS: as 19 da #4, que foram reexecutadas, e as 13 da #13.
+
+| Cenário | Resultado | Observado |
+|---|---|---|
+| I1 configuração de produção | PASS | `3|60.0|2.0|15`: `retries`, `retry_delay` em segundos, multiplicador do backoff e timeout HTTP, lidos sem a variável de atraso reduzido do override |
+| I2 coleta normal | PASS | 1 tentativa `success`; XCom `tipo_raiz` `array`, 6 produtos, `695` e `109.95` como strings, categoria `men's clothing`; 704 bytes |
+| I3 falha transitória | PASS | HTTP 500 na 1ª tentativa; tentativas `1:failed 2:success`; 2 requisições; run `success` e as 3 tasks seguintes executadas |
+| I4 falha persistente | PASS | 4 respostas 500; tentativas `1:failed 2:failed 3:failed 4:failed`; run `failed`; `analise.consolidar` e `publicacao.publicar` `upstream_failed`; intervalos de 4, 6 e 16 s entre requisições; exceção registrada nas 4 tentativas |
+
+No Airflow 3.4, a linha da tentativa que leva à retentativa fica com estado `failed`. A espera seguinte é sorteada entre N e 2N.
+
+Verificação contra a FakeStore real (`https://fakestoreapi.com/products`, imagem `apache/airflow:3.4.0-python3.12`):
+
+- O `User-Agent` padrão `Python-urllib/3.12` recebeu `HTTP Error 403: Forbidden`, e `shopbrasil-pipeline/1.0` recebeu 200 com 10.640 bytes.
+- `coletar_catalogo(composicao.fonte_catalogo())` devolveu `array` com 20 produtos e XCom de 2.280 bytes.
+- Categorias: `men's clothing` 4, `jewelery` 4, `electronics` 6 e `women's clothing` 6.
+- Os 20 preços vieram com `tipo_preco` `number`. Os inteiros `695`, `168`, `64`, `109`, `109`, `114` e `599` foram preservados como strings decimais.
+
+Testes unitários: `Ran 42 tests ... OK`. Lint: `OK: 15 arquivo(s) Python verificado(s), nenhuma violação de arquitetura.`
+
+Revisão cruzada do Kiro sobre 0f82aba: **reprovado** por um bloqueante. A FakeStore real responde 403 ao `User-Agent` padrão do `urllib`.
+
+Correções aplicadas em 768dac1:
+- `User-Agent` próprio, com teste unitário. A FakeStore controlada passou a responder 403 a `Python-urllib`, como a API real.
+- `retry_exponential_backoff=2.0` explícito, conferido no I1.
+- Configuração ausente falha com `AirflowFailException`, sem gastar retentativas.
+- Remoção de `TIPOS_JSON`, que não era usado.
+- O README passou a citar `NaN` e `Infinity` para a #6.
