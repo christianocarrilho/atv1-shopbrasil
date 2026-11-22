@@ -5,11 +5,11 @@ Código de pessoa: 1691353
 Matrícula: 262987
 
 Conecta os contratos da aplicação aos adaptadores concretos: FakeStore (#13) e publicação no
-PostgreSQL (#17). O DAG obtém daqui fontes e casos de uso já montados e não importa a
-infraestrutura. A configuração vem do ambiente do contêiner. O adaptador PostgreSQL é importado
-dentro da função para que os testes unitários, só com a biblioteca padrão, importem este módulo
-sem o provider do Airflow. A #18 acrescenta o histórico em ``etapas_adicionais`` para que ele
-grave na mesma transação do snapshot.
+PostgreSQL (#17), com o histórico por run (#18) na mesma transação. O DAG obtém daqui fontes e
+casos de uso já montados e não importa a infraestrutura. A configuração vem do ambiente do
+contêiner. Os adaptadores PostgreSQL são importados dentro da função para que os testes
+unitários, só com a biblioteca padrão, importem este módulo sem o provider do Airflow. O histórico entra em ``etapas_adicionais`` para gravar com o mesmo
+cursor, depois do snapshot e antes do único commit.
 """
 
 from __future__ import annotations
@@ -29,7 +29,13 @@ def fonte_catalogo() -> FonteCatalogo:
 
 
 def publicar_snapshot(conn_id: str = CONN_ID_PADRAO) -> PublicarSnapshot:
-    """Caso de uso da publicação ligado ao PostgreSQL pela Connection do Airflow."""
+    """Caso de uso da publicação ligado ao PostgreSQL pela Connection do Airflow.
+
+    Cadastro, snapshot e histórico por run são confirmados juntos ou revertidos juntos.
+    """
+    from shopbrasil_pipeline.infraestrutura.historico_postgres import RegistrarHistoricoPostgres
     from shopbrasil_pipeline.infraestrutura.publicacao_postgres import PublicadorSnapshotPostgres
 
-    return PublicarSnapshot(PublicadorSnapshotPostgres(conn_id=conn_id, etapas_adicionais=()))
+    return PublicarSnapshot(
+        PublicadorSnapshotPostgres(conn_id=conn_id, etapas_adicionais=(RegistrarHistoricoPostgres(),))
+    )

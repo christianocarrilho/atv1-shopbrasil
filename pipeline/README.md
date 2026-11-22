@@ -31,7 +31,7 @@ Interface entregue à #6 (XCom de `buscar_produtos`), uma projeção pequena que
 
 ## Publicação
 
-O caso de uso `PublicarSnapshot` ([aplicacao/publicacao.py](shopbrasil_pipeline/aplicacao/publicacao.py)) recebe a `Execucao` e a coleção consolidada de `MetricasCategoria`, um item por código, e publica o snapshot da data de referência numa transação do adaptador PostgreSQL ([infraestrutura/publicacao_postgres.py](shopbrasil_pipeline/infraestrutura/publicacao_postgres.py)). A [composição](shopbrasil_pipeline/composicao.py) entrega o caso de uso montado com a Connection `shopbrasil_postgres`: `composicao.publicar_snapshot().executar(execucao, metricas)`. A ligação com a task `publicacao.publicar` do DAG é da #16, e o histórico por run da #18 entra como etapa adicional da mesma transação.
+O caso de uso `PublicarSnapshot` ([aplicacao/publicacao.py](shopbrasil_pipeline/aplicacao/publicacao.py)) recebe a `Execucao` e a coleção consolidada de `MetricasCategoria`, um item por código, e publica o snapshot da data de referência numa transação do adaptador PostgreSQL ([infraestrutura/publicacao_postgres.py](shopbrasil_pipeline/infraestrutura/publicacao_postgres.py)). A [composição](shopbrasil_pipeline/composicao.py) entrega o caso de uso montado com a Connection `shopbrasil_postgres`: `composicao.publicar_snapshot().executar(execucao, metricas)`. A ligação com a task `publicacao.publicar` do DAG é da #16. O histórico por run da #18 ([infraestrutura/historico_postgres.py](shopbrasil_pipeline/infraestrutura/historico_postgres.py)) já está ligado pela composição como etapa adicional da mesma transação: cada publicação grava as linhas `(run_id, categoria_id)` em append, e o reprocessamento da mesma run preserva as já registradas.
 
 ## Testes
 
