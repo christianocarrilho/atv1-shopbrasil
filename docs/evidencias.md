@@ -223,3 +223,12 @@ Linhas reais da run `e2e__falha_persistente`:
 ```
 
 Testes unitários: `Ran 54 tests ... OK`. Lint: `OK: 21 arquivo(s) Python verificado(s), nenhuma violação de arquitetura.`
+
+Revisão cruzada do Kiro sobre 1d297b1: aprovável com recomendações, sem bloqueantes. Ajustes em 30ddff2:
+- tentativa contada no ciclo atual, que continua correta depois de `tasks clear`;
+- falha sem retentativa (`AirflowFailException`) gera alerta "sem retentativa (erro não recuperável)", e não "esgotou";
+- `on_failure_callback` do DAG emite `[SHOPBRASIL][FALHA RUN]`, gravado no log do dag-processor;
+- C2 confirma que não há `[FALHA]` na recuperação;
+- texto procurado nos logs passado ao grep como argumento.
+
+Sobre 30ddff2, `e2e/pipeline/executar.sh` terminou com código 0 e 40 PASS, incluindo `C5 aviso de falha da run`: 1 linha `[FALHA RUN]` para `e2e__falha_persistente`. Testes unitários: `Ran 56 tests ... OK`.
