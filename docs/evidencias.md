@@ -383,8 +383,12 @@ Achados e tratamento, todos em `correcoes-revisao-cruzada`:
 | Kiro 2 | #16 sem evidências por cenário | Recomendação | Seção da #16 acima |
 | Kiro 3 | Tentativa após reprocessar não verificada | Observação | C6 confere `tentativa=1/4` no `attempt=2.log` (5f589db) |
 | Kiro 9 | READMEs do pipeline desatualizados | Observação | Atualizados (7d81c45) |
-| Kiro 4–8 | Arredondamento de mín/máx, constante HALF_UP, ganchos de teste por variável de ambiente, ramo não-`Mapping` do operador, código da categoria sem normalização | Observação | Mantidos: não contrariam o enunciado nem as issues; I1 confere os valores de produção sem os ganchos |
-| Claude | Reprocessar a mesma run com dados novos atualiza o snapshot, mas o histórico da run mantém os valores originais | Observação | Mantido: a especificação manda preservar as linhas existentes no reprocessamento da mesma run; demonstrado em H2 |
+| Kiro 4 | Mínimo e máximo arredondados para duas casas | Observação | Corrigido: a validação recusa preço com mais de duas casas ou acima de `numeric(12,2)` (escala do esquema), e mínimo e máximo não são mais arredondados; preço fora da escala no cálculo é erro (9c59db1, e5e62d5) |
+| Kiro 5 | Média não usava `MODO_ARREDONDAMENTO` | Observação | Corrigido: o empate exato é resolvido por `Decimal` com o modo configurado; teste troca o modo e vê a média mudar (e5e62d5) |
+| Kiro 6 | Ajustes de teste por variável de ambiente podiam mudar o retry em produção sem aviso | Observação | Corrigido: `[SHOPBRASIL][AVISO] ajuste de teste ativo` no log da coleta; I1 confere nenhum aviso sem as variáveis e C7 confere os avisos no E2E (918cf29) |
+| Kiro 7 | Operador sem teste unitário | Observação | Corrigido: `tests/test_operador_validar.py` cobre saída, falha sem retentativa, XCom fora do formato e campo templatizado; roda na imagem do Airflow (4 OK) (9c59db1) |
+| Kiro 8 | Código da categoria sem normalização | Observação | Corrigido sem alterar o valor da FakeStore: categoria com espaços nas extremidades é recusada, pois criaria uma chave distinta (9c59db1) |
+| Claude | Reprocessar a mesma run com dados novos atualiza o snapshot, mas o histórico da run mantém os valores originais | Observação | Corrigido dentro da especificação, que manda preservar as linhas: a etapa do histórico relê a run e registra `[SHOPBRASIL][AVISO] histórico preservado diverge do snapshot` por categoria; H2 confere um aviso só para a categoria alterada (5d2cfab) |
 
 **Desvio de processo:** o AGENTS.md pedia a suíte completa aprovada antes do merge em `main`. O PR #49 foi integrado com a validação pendente; a primeira execução falhou por defeitos dos testes, corrigidos no PR #50, e a revisão cruzada acima aconteceu depois do merge. O código de produção não teve defeito funcional apontado.
 
@@ -402,3 +406,18 @@ Executada em 22 nov. 2026 sobre 5f589db (`correcoes-revisao-cruzada`), mesmo amb
 | integrado | PASS | 29 | 0 | 163s |
 
 Destaques: G1 `4.6.1|10.00,10.01|10,10.01@2|…|20,None,10,None@4|spanGaps=False|erros=0`; N7 `4.6.1|86.50,695.00,66.13,67.76,9.85|86.5,695,66.13,67.76,9.85@5|data=2026-11-09;Sem métricas para esta data;…|None,None,67.76,None,None@5|…|erros=0`; N5 `2:success` na nova tentativa da publicação. Lint de arquitetura `OK: 48 arquivo(s)`, testes do lint (39), do pipeline e da web (48) aprovados.
+
+## Validação final após as observações da revisão
+
+Executada em 22 nov. 2026 sobre 5d2cfab (`observacoes-revisao`), com todas as observações da revisão cruzada corrigidas. Comando: `e2e/executar_todos.sh`. Código de saída 0. **246 verificações PASS, 0 FAIL.**
+
+| Cenário | Resultado | PASS | FAIL | Duração |
+|---|---|---|---|---|
+| ambiente | PASS | 29 | 0 | 61s |
+| esquema | PASS | 36 | 0 | 10s |
+| pipeline | PASS | 72 | 0 | 206s |
+| publicacao | PASS | 45 | 0 | 39s |
+| web | PASS | 35 | 0 | 17s |
+| integrado | PASS | 29 | 0 | 158s |
+
+Novas verificações: I1 `3|60.0|2.0|15|avisos=0`; C7 `1|1`; H2 aviso de divergência `1|0`. Lint de arquitetura `OK: 49 arquivo(s)`; testes unitários do pipeline, do lint e da web aprovados; testes do operador na imagem do Airflow 3.4.0: 4 OK.
