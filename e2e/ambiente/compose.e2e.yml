@@ -1,0 +1,26 @@
+# Autor: Christiano Henrique Carrilho Lopes da Silva
+# Código de pessoa: 1691353
+# Matrícula: 262987
+# Override do cenário E2E de ambiente (#2). Acrescenta a fixture SQL isolada ao db-init e troca
+# a pasta de DAGs pela fixture de sonda, mantendo imagens, contas, Connection e pool do ambiente real.
+# Os caminhos são relativos à raiz do projeto, primeiro arquivo passado ao docker compose.
+
+services:
+  db-init:
+    environment:
+      SHOPBRASIL_SQL_EXTRA_DIR: /e2e/sql
+    volumes:
+      - ./e2e/ambiente/fixtures:/e2e:ro
+
+  airflow-init:
+    volumes:
+      - ./e2e/ambiente/fixtures/dags:/opt/airflow/dags:ro
+  airflow-apiserver:
+    volumes:
+      - ./e2e/ambiente/fixtures/dags:/opt/airflow/dags:ro
+  airflow-scheduler:
+    volumes:
+      - ./e2e/ambiente/fixtures/dags:/opt/airflow/dags:ro
+  airflow-dag-processor:
+    volumes:
+      - ./e2e/ambiente/fixtures/dags:/opt/airflow/dags:ro

@@ -17,4 +17,10 @@ Projeto da Atividade 01 de Orquestração de Workflows. O pipeline coleta o cat�
 
 ## Configuração local
 
-Copie `.env.example` para `.env` se o arquivo local ainda não existir. Preencha as senhas no `.env` e ajuste o host conforme o ambiente de execução. O template descreve as variáveis iniciais. Sua integração com Docker, a Connection do Airflow e a Web/API será feita nas respectivas issues.
+Copie `.env.example` para `.env` se o arquivo local ainda não existir e preencha as senhas. Um `.env` anterior à #2 precisa receber as variáveis novas do template. Depois suba o ambiente:
+
+```sh
+docker compose up -d --wait
+```
+
+O Airflow fica em http://localhost:8080. O [guia do ambiente Docker](docs/ambiente-docker.md) descreve serviços, contas, Connection, pool e comandos. O cenário E2E do ambiente roda com `e2e/ambiente/executar.sh`.
