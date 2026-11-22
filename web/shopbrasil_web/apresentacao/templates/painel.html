@@ -1,5 +1,6 @@
 {#- Autor: Christiano Henrique Carrilho Lopes da Silva | Código de pessoa: 1691353 | Matrícula: 262987
-    Painel de métricas da ShopBrasil (#19), com barras do preço médio (#20). A #21 acrescenta a linha nesta mesma tela. -#}
+    Painel de métricas da ShopBrasil (#19), com barras do preço médio (#20) e linha de evolução (#21).
+    Um único formulário GET guarda data e filtros da evolução, para que nenhum se perca ao mudar o outro. -#}
 <!doctype html>
 <html lang="pt-BR">
 <head>
@@ -10,7 +11,7 @@
     body { font-family: system-ui, sans-serif; margin: 0 auto; max-width: 960px; padding: 16px; color: #1f2328; background: #fff; }
     h1 { font-size: 1.4rem; }
     h2 { font-size: 1.1rem; margin-top: 2rem; }
-    form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    form, .filtros { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
     th, td { border-bottom: 1px solid #d0d7de; padding: 6px 8px; text-align: left; }
     td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
@@ -74,8 +75,31 @@
   {#- Coleção diária carregada, reutilizada pelas barras da #20 sem nova consulta. #}
   <script type="application/json" id="metricas-dados">{{ metricas_json | tojson }}</script>
 
-  {#- Ponto de inserção da linha de evolução (#21). #}
-  <section id="evolucao"></section>
+  {#- Linha de evolução do preço médio (#21): filtros de categoria e intervalo no mesmo formulário. #}
+  <section id="evolucao">
+    <h2>Evolução diária do preço médio</h2>
+    <div class="filtros">
+      <label for="categoria">Categoria</label>
+      <select id="categoria" name="categoria" form="filtro-data">
+        {% for c in categorias %}
+        <option value="{{ c.codigo }}"{% if c.codigo == evolucao.categoria %} selected{% endif %}>{{ c.descricao }}</option>
+        {% endfor %}
+      </select>
+      <label for="inicio">De</label>
+      <input type="date" id="inicio" name="inicio" form="filtro-data" value="{{ evolucao.inicio }}">
+      <label for="fim">Até</label>
+      <input type="date" id="fim" name="fim" form="filtro-data" value="{{ evolucao.fim }}">
+      <button type="submit" form="filtro-data">Atualizar</button>
+    </div>
+    {% if evolucao.aviso %}
+      <p class="vazio" id="evolucao-aviso">{{ evolucao.aviso }}</p>
+    {% else %}
+      <div class="grafico"><canvas id="grafico-evolucao" aria-label="Evolução diária do preço médio"></canvas></div>
+    {% endif %}
+  </section>
+
+  {#- Série do intervalo, igual a /api/evolucao: um ponto por dia, null nos dias sem observação. #}
+  <script type="application/json" id="evolucao-dados">{{ evolucao.serie | tojson }}</script>
 
   <script src="/estaticos/chart.umd.min.js"></script>
   <script>
@@ -101,6 +125,32 @@
             tooltip: { callbacks: { label: ctx => "Preço médio: " + dados.metricas[ctx.dataIndex].preco_medio } }
           },
           scales: { y: { beginAtZero: true } }
+        }
+      });
+    })();
+
+    // Linha (#21): um ponto por dia; null fica como lacuna (spanGaps false), nunca como zero.
+    (function () {
+      const canvas = document.getElementById("grafico-evolucao");
+      const serie = JSON.parse(document.getElementById("evolucao-dados").textContent);
+      if (!canvas || !serie) return;
+      new Chart(canvas, {
+        type: "line",
+        data: {
+          labels: serie.pontos.map(p => p.data),
+          datasets: [{
+            label: serie.categoria.descricao,
+            data: serie.pontos.map(p => p.preco_medio === null ? null : Number(p.preco_medio)),
+            borderColor: "#0969da",
+            backgroundColor: "#0969da",
+            spanGaps: false
+          }]
+        },
+        options: {
+          maintainAspectRatio: false,
+          plugins: {
+            tooltip: { callbacks: { label: ctx => "Preço médio: " + serie.pontos[ctx.dataIndex].preco_medio } }
+          }
         }
       });
     })();

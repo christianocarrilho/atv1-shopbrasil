@@ -7,7 +7,8 @@
 # porta publicada em 127.0.0.1: data com métricas, última data, data sem registros, série com
 # lacunas em ordem de data, categorias, erros 422/400/404, preços como strings decimais e que a
 # conta da web só lê. Página do painel (#19): abre na última data, filtro por data, estado vazio
-# e mesmos valores da API. Barras (#20): mesma coleção da tabela, estado vazio e Chart.js local. O Airflow não sobe: a web depende só do esquema e da conta de leitura.
+# e mesmos valores da API. Barras (#20): mesma coleção da tabela, estado vazio e Chart.js local.
+# Linha (#21): filtros de categoria e intervalo, série igual à API, lacunas como null. O Airflow não sobe: a web depende só do esquema e da conta de leitura.
 #
 # Uso: e2e/web/executar.sh
 # Variáveis opcionais: E2E_AIRFLOW_API_PORT (porta da web neste cenário; padrão 18110, ou a
@@ -121,5 +122,21 @@ verificar "B2 barras em dia sem métricas" "0|1" \
   "$(curl -sS "$BASE/?data=2026-11-21" | grep -c 'id="grafico-barras"')|$(curl -sS "$BASE/?data=2026-11-21" | grep -c 'id="barras-vazio">Sem métricas para esta data<')"
 verificar "B3 Chart.js local" "200|1" \
   "$(codigo_http /estaticos/chart.umd.min.js)|$(curl -sS "$BASE/estaticos/chart.umd.min.js" | head -c 200 | grep -c 'Chart.js v4.6.1')"
+
+# E. Linha de evolução (#21): série embutida na página igual a /api/evolucao, lacunas como null.
+evolucao_da_pagina() {
+  curl -sS "$BASE/$1" | python3 -c 'import html,json,re,sys; p=sys.stdin.read(); m=re.search(r"<script type=\"application/json\" id=\"evolucao-dados\">(.*?)</script>", p, re.S); a=re.search(r"id=\"evolucao-aviso\">(.*?)<", p); print(json.dumps(json.loads(m.group(1)), ensure_ascii=False, separators=(",", ":")) + "|" + (html.unescape(a.group(1)) if a else ""))'
+}
+FILTRO_E1='categoria=electronics&inicio=2026-11-20&fim=2026-11-23'
+verificar "E1 série da página igual à API, com lacunas" "$(json "/api/evolucao?$FILTRO_E1")|" "$(evolucao_da_pagina "?$FILTRO_E1")"
+verificar "E1 pontos e lacunas" "2026-11-20=20.00 2026-11-21=None 2026-11-22=10.00 2026-11-23=None" \
+  "$(json "/api/evolucao?$FILTRO_E1" | python3 -c 'import json,sys; print(" ".join("%s=%s" % (p["data"], p["preco_medio"]) for p in json.load(sys.stdin)["pontos"]))')"
+verificar "E2 padrão: primeira categoria, 30 dias até a data" "electronics|2026-10-25|2026-11-23|30" \
+  "$(evolucao_da_pagina '?data=2026-11-23' | cut -d'|' -f1 | python3 -c 'import json,sys; s=json.load(sys.stdin); print(s["categoria"]["codigo"], s["inicio"], s["fim"], len(s["pontos"]), sep="|")')"
+verificar "E3 categoria com espaço e apóstrofo" "men's clothing|2026-11-20|2026-11-24" \
+  "$(evolucao_da_pagina "?categoria=men%27s%20clothing&inicio=2026-11-20&fim=2026-11-24" | cut -d'|' -f1 | python3 -c 'import json,sys; s=json.load(sys.stdin); print(s["categoria"]["codigo"], s["inicio"], s["fim"], sep="|")')"
+verificar "E4 intervalo invertido vira aviso" "null|Intervalo inválido: início 2026-11-23 depois do fim 2026-11-20" \
+  "$(evolucao_da_pagina '?categoria=electronics&inicio=2026-11-23&fim=2026-11-20')"
+verificar "E4 categoria desconhecida vira aviso" "null|Categoria 'toys' não cadastrada" "$(evolucao_da_pagina '?categoria=toys')"
 
 resumo
