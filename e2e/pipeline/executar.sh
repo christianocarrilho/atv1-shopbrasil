@@ -37,12 +37,12 @@ if aguardar_dag "$DAG_ID"; then registrar PASS "P1 DAG registrado" "$DAG_ID"; el
 verificar "P1 erros de importação" "0" "$(admin_sql airflow "SELECT count(*) FROM import_error")"
 
 # P2. Estrutura: TaskGroups e dependências criadas pelas chamadas TaskFlow.
-estrutura="$(dc exec -T airflow-scheduler python - <<'PY' 2>/dev/null | tail -1
+estrutura="$(dc exec -T airflow-scheduler python - <<'PY' 2>/dev/null | sed -n 's/^RESULTADO=//p' | tail -1
 from airflow.dag_processing.dagbag import DagBag
 dag = DagBag("/opt/airflow/dags").dags["shopbrasil_metricas"]
 grupos = sorted(k for k, v in dag.task_group.children.items() if hasattr(v, "children"))
 arestas = sorted(f"{u}>{t.task_id}" for t in dag.tasks for u in t.upstream_task_ids)
-print(",".join(grupos) + "|" + " ".join(arestas))
+print("RESULTADO=" + ",".join(grupos) + "|" + " ".join(arestas))
 PY
 )"
 verificar "P2 TaskGroups e dependências" \
@@ -52,10 +52,10 @@ verificar "P2 TaskGroups e dependências" \
 # P3. Agenda: cron das 06:00 em Brasília, start_date com pendulum e catchup=False.
 verificar "P3 agenda registrada" "0 6 * * *|America/Sao_Paulo" \
   "$(admin_sql airflow "SELECT timetable_summary || '|' || (SELECT data::json->'dag'->'timetable'->'__var'->>'timezone' FROM serialized_dag WHERE dag_id = '$DAG_ID' ORDER BY created_at DESC LIMIT 1) FROM dag WHERE dag_id = '$DAG_ID'" 2>/dev/null)"
-config_dag="$(dc exec -T airflow-scheduler python - <<'PY' 2>/dev/null | tail -1
+config_dag="$(dc exec -T airflow-scheduler python - <<'PY' 2>/dev/null | sed -n 's/^RESULTADO=//p' | tail -1
 from airflow.dag_processing.dagbag import DagBag
 dag = DagBag("/opt/airflow/dags").dags["shopbrasil_metricas"]
-print(f"{dag.start_date.isoformat()}|{dag.timezone.name}|catchup={dag.catchup}")
+print(f"RESULTADO={dag.start_date.isoformat()}|{dag.timezone.name}|catchup={dag.catchup}")
 PY
 )"
 verificar "P3 start_date, fuso e catchup" "2026-11-01T03:00:00+00:00|America/Sao_Paulo|catchup=False" "$config_dag"
@@ -161,7 +161,7 @@ config_busca="$(dc exec -T airflow-scheduler env -u SHOPBRASIL_BUSCA_RETRY_DELAY
 from airflow.dag_processing.dagbag import DagBag
 from shopbrasil_pipeline.composicao import fonte_catalogo
 t = DagBag("/opt/airflow/dags").dags["shopbrasil_metricas"].get_task("ingestao.buscar_produtos")
-print(f"{t.retries}|{t.retry_delay.total_seconds()}|{t.retry_exponential_backoff}|{fonte_catalogo().timeout}")' 2>/dev/null | tail -1)"
+print(f"RESULTADO={t.retries}|{t.retry_delay.total_seconds()}|{t.retry_exponential_backoff}|{fonte_catalogo().timeout}")' 2>/dev/null | sed -n 's/^RESULTADO=//p' | tail -1)"
 verificar "I1 retries, atraso inicial, backoff e timeout de produção" "3|60.0|2.0|15" "$config_busca"
 
 # I2. Coleta normal (run P4): uma tentativa, projeção com preços como strings decimais e XCom pequeno.

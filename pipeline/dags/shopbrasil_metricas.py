@@ -26,7 +26,7 @@ import os
 from datetime import timedelta
 
 import pendulum
-from airflow.exceptions import AirflowFailException
+from airflow.sdk.exceptions import AirflowFailException
 from airflow.sdk import CronTriggerTimetable, dag, get_current_context, task, task_group
 
 from operadores.validar_produtos import ValidarProdutosOperator

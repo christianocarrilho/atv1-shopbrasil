@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from airflow.exceptions import AirflowFailException
+from airflow.sdk.exceptions import AirflowFailException
 from airflow.sdk import BaseOperator
 
 from shopbrasil_pipeline.aplicacao.catalogo import CatalogoColetado
