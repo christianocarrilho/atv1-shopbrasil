@@ -53,3 +53,16 @@ Consulte a [especificação da ShopBrasil](docs/especificacao.md) para o modelo 
 
 - Abra uma branch por issue a partir de `main` atualizada. Revise a alteração antes de abrir o PR para `main`. Após aprovação e verificações aplicáveis, faça o merge e encerre a issue. Use `main` como única branch permanente.
 - Reúna comandos, resultados observados, evidências e links em `docs/evidencias.md`. O autor compartilhará com o professor o link do repositório e o do documento.
+
+## Critérios obrigatórios de revisão e merge
+
+- Antes de editar, leia este arquivo, a especificação e a issue, incluindo seus critérios de aceite e dependências. Mantenha o escopo da issue. Se encontrar conflito entre instruções ou precisar alterar um contrato aprovado, registre a divergência para o Codex resolver antes de implementar a parte afetada.
+- Atribua toda nova issue a `christianocarrilho`. Abra uma branch por issue a partir de `main` atualizada. Para uma entrega individual, inclua `Closes #N` no PR para `main` e confirme o fechamento da issue após o merge. Use apenas uma referência à issue agregadora até que todas as sub-issues estejam integradas e o conjunto validado.
+- Aplique a revisão cruzada definida acima. O Codex faz a revisão final, confere escopo, cabeçalhos, contratos, arquitetura e evidências e integra somente após resolver os achados e passar nas verificações aplicáveis.
+
+## Lint de arquitetura
+
+- No Pipeline, `dominio` usa apenas a biblioteca padrão. `aplicacao` usa seu próprio código e `dominio`, sem acoplar a Airflow, HTTP, PostgreSQL ou adaptadores concretos. `infraestrutura` pode usar os contratos da aplicação e os tipos do domínio. O DAG aciona casos de uso e a composição. Restrinja a ligação com adaptadores concretos ao ponto de composição.
+- Na Web/API, `apresentacao` usa os casos de uso e modelos de `consultas`, sem acessar `infraestrutura` diretamente. `consultas` define seus modelos de leitura e contratos sem depender de HTTP ou PostgreSQL. `infraestrutura` implementa esses contratos. A composição é o ponto que conecta apresentação, consultas e adaptadores.
+- Proíba imports entre `pipeline/` e `web/` nos dois sentidos. O esquema em `db/` é o contrato entre eles. O lint da #26 deve verificar imports absolutos e relativos e falhar com diagnóstico acionável em caso de violação; cubra o resultado com exemplos permitidos e proibidos.
+- Execute o comando versionado do lint de arquitetura em cada PR que altere código ou regras de dependência e registre o resultado no PR. PR de código sujeito às regras só entra em `main` depois que a checagem estiver disponível e passar. Não silencie violações nem amplie permissões para passar no lint. A revisão também verifica responsabilidades que imports não revelam, como SQL no DAG ou no controller.
