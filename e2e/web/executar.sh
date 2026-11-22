@@ -7,7 +7,7 @@
 # porta publicada em 127.0.0.1: data com métricas, última data, data sem registros, série com
 # lacunas em ordem de data, categorias, erros 422/400/404, preços como strings decimais e que a
 # conta da web só lê. Página do painel (#19): abre na última data, filtro por data, estado vazio
-# e mesmos valores da API. O Airflow não sobe: a web depende só do esquema e da conta de leitura.
+# e mesmos valores da API. Barras (#20): mesma coleção da tabela, estado vazio e Chart.js local. O Airflow não sobe: a web depende só do esquema e da conta de leitura.
 #
 # Uso: e2e/web/executar.sh
 # Variáveis opcionais: E2E_AIRFLOW_API_PORT (porta da web neste cenário; padrão 18110, ou a
@@ -112,5 +112,14 @@ verificar "P4 data sem registros" \
   '2026-11-21|2026-11-21|Sem métricas para esta data||{"data":"2026-11-21","vazia":true,"metricas":[]}' \
   "$(pagina '?data=2026-11-21')"
 verificar "P5 data inválida na página" "422" "$(codigo_http '/?data=2026-02-30')"
+
+# B. Barras do preço médio (#20): canvas alimentado pela coleção embutida (já conferida em P3), estado
+# vazio no dia sem métricas e Chart.js 4.6.1 servido pela própria web, sem CDN.
+verificar "B1 barras no dia com métricas" "1|0" \
+  "$(curl -sS "$BASE/?data=2026-11-22" | grep -c 'id="grafico-barras"')|$(curl -sS "$BASE/?data=2026-11-22" | grep -c 'id="barras-vazio"')"
+verificar "B2 barras em dia sem métricas" "0|1" \
+  "$(curl -sS "$BASE/?data=2026-11-21" | grep -c 'id="grafico-barras"')|$(curl -sS "$BASE/?data=2026-11-21" | grep -c 'id="barras-vazio">Sem métricas para esta data<')"
+verificar "B3 Chart.js local" "200|1" \
+  "$(codigo_http /estaticos/chart.umd.min.js)|$(curl -sS "$BASE/estaticos/chart.umd.min.js" | head -c 200 | grep -c 'Chart.js v4.6.1')"
 
 resumo
