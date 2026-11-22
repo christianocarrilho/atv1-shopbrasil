@@ -1,0 +1,55 @@
+# Convenções da ShopBrasil
+
+**Autor:** Christiano Henrique Carrilho Lopes da Silva
+Código de pessoa: 1691353
+Matrícula: 262987
+
+Este arquivo orienta a implementação e a revisão dos artefatos do pipeline e da Web/API.
+
+## Cabeçalhos dos arquivos
+
+- No topo de cada artefato escrito à mão, inclua o nome do autor e uma descrição breve da responsabilidade do arquivo. Quando houver uma decisão técnica relevante naquele ponto, explique em uma frase por que ela foi adotada.
+- Em Python, use a docstring do módulo. Em SQL, YAML, Dockerfile, JavaScript, CSS e HTML, use comentários válidos para o formato. Em Markdown, coloque a identificação e a descrição logo após o título. Preserve linhas que precisam vir primeiro, como o shebang de um script.
+- Mantenha arquivos gerados e formatos que não aceitam comentários válidos. Se a explicação for útil, coloque-a na documentação mais próxima.
+- Use o nome, o código de pessoa e a matrícula indicados no topo deste arquivo nos cabeçalhos dos artefatos escritos à mão. O autor autorizou a publicação desses dados no repositório acadêmico.
+- Inclua a conferência desses cabeçalhos na revisão de cada entrega.
+
+## Escopo e arquitetura
+
+Consulte a [especificação da ShopBrasil](docs/especificacao.md) para o modelo de dados e as decisões de implementação consolidadas.
+
+- Consulte o [enunciado da Atividade 01](<docs/Atividade 01 - Descrição.pdf>) como fonte dos requisitos acadêmicos. A seção 3 traz os requisitos obrigatórios, a seção 4 lista os opcionais e a seção 5 define a entrega. Use as issues do repositório como backlog. Os três opcionais aprovados são o operador de validação, o histórico em append e o alerta simulado. A Web/API e a suíte E2E são extras aprovados.
+- Mantenha `pipeline/` e `web/` no mesmo repositório, com o esquema compartilhado em `db/`. O esquema PostgreSQL é o contrato entre os módulos. A web usa acesso de leitura e seus próprios tipos, sem importar código do pipeline. O pipeline funciona independentemente da web.
+- No pipeline, o DAG define a orquestração e chama a aplicação. A aplicação coordena operações, define os contratos de catálogo e persistência e usa o domínio. O domínio calcula as métricas e depende apenas de Python. Os adaptadores traduzem os dados HTTP e concentram acesso ao banco, SQL e transações. O ponto de composição conecta contratos aos adaptadores concretos. O DAG não contém SQL nem fórmulas.
+- Na Web/API, a apresentação recebe filtros e traduz a resposta HTTP. O caso de uso define o modelo de leitura e depende do contrato do repositório. O repositório PostgreSQL implementa esse contrato e contém o SQL. A composição conecta controller, caso de uso e repositório. A página e a API compartilham os casos de uso. Crie entidades de domínio web se surgirem regras de negócio próprias.
+
+## Pipeline e falhas
+
+- Use TaskFlow (`@dag`, `@task`), dependências pelas chamadas, pelo menos dois TaskGroups e trechos linear, fan-out e fan-in identificáveis. Use XCom automático via `return` com dados pequenos e serializáveis. Mapeie com `.expand(...)` sobre as categorias encontradas na coleta, sem lista fixa, e aplique `ecommerce_pool` com dois slots às tasks mapeadas. Consolide os resultados antes de publicar.
+- Agende diariamente às 06:00 em `America/Sao_Paulo`, usando `pendulum`, `start_date` e `catchup=False`. A data de referência é a data da ocorrência agendada em Brasília. Para reprocessar, execute novamente as tasks da própria run e preserve `run_id` e data de referência. O Airflow acompanha status e tentativas.
+- Em Buscar Produtos, use timeout HTTP de 15 segundos, três retentativas após a tentativa inicial, atraso inicial de um minuto e backoff exponencial. Use `try/except` e relance o erro para acionar o retry. Configure callbacks de retry, sucesso e falha na task. Registre um aviso identificável quando o pipeline falhar e simule o envio do alerta quando a ingestão esgotar as tentativas.
+- Execute `ValidarProdutosOperator(BaseOperator)` após a ingestão e antes do cálculo. Catálogo vazio ou qualquer produto inválido interrompe a publicação e preserva os dados existentes. Uma categoria ausente de um catálogo válido fica fora do resultado daquele dia.
+- Calcule preço médio, mínimo, máximo e quantidade por categoria. Use `Decimal` no cálculo e arredonde a média uma vez para duas casas ao produzir o resultado. Use `NUMERIC` com duas casas no banco e exiba os mesmos valores na web. Defina na #15 como transportar os valores pelo XCom preservando sua precisão.
+
+## Modelo de dados e publicação
+
+- `categoria`: `id` PK `IDENTITY`, `codigo` único derivado do valor da FakeStore e `descricao`. Cadastre novas categorias automaticamente. O cadastro permanece quando a categoria está ausente da coleta.
+- `metricas_categoria`: `id` PK `IDENTITY`, FK `categoria_id`, `data_referencia` e quatro métricas, com unicidade por data e categoria. Uma publicação bem-sucedida substitui o conjunto daquele dia.
+- `metricas_categoria_historico`: FK `categoria_id`, `run_id`, data da execução e quatro métricas. Grave em append com unicidade por run e categoria. Reprocessar a mesma run preserva as entradas de histórico já registradas.
+- Use `PostgresHook` com uma Connection do Airflow. Cadastro, snapshot e histórico compartilham a transação de publicação. Uma falha reverte a operação e preserva os dados anteriores. O modelo tem três tabelas analíticas, sem campo `ativo` e sem tabela própria de controle de execução.
+
+## Dashboard
+
+- Uma tela com filtro por data, tabela das quatro métricas e barras de preço médio por categoria para o dia selecionado. Abra na data mais recente com métricas, mostre a data selecionada e use “Sem métricas para esta data” quando o dia não tiver registros.
+- Na mesma tela, mostre a evolução diária do preço médio em linha com filtros por categoria e intervalo. Mantenha lacunas nos dias sem dados. As visualizações consultam o snapshot diário. Demonstre o histórico por run por consulta ao banco.
+
+## Ambiente, execução do trabalho e entrega
+
+- Dockerize o projeto, provisionando a Connection e o pool. Na #1, registre versões compatíveis de Python, Airflow, provider e PostgreSQL, a tecnologia Web/API e a forma de aplicar o esquema SQL. Defina o valor de `start_date` na configuração do DAG e documente como subir o ambiente.
+- Claude Opus implementa DAG, ingestão e análise. Kiro com Claude Opus implementa ambiente, esquema e persistência. Alinhe primeiro o contrato de saída das métricas entre as frentes. Claude revisa a frente do Kiro, Kiro revisa a do Claude e Codex faz a revisão final integrada, incluindo a web.
+- Use o padrão de issue `[Tipo] - Área - Verbo no infinitivo + objeto`. Tipos: Task, Feature, Bug, Validação e Documentação. Áreas: Pipeline, Web e Projeto. Inclua label de área, tipo no corpo, escopo, critérios de aceite verificáveis e dependências. Divida entregas extensas em sub-issues com resultados independentes.
+- Na #23, use Airflow e PostgreSQL reais em Docker, com dados isolados e respostas controladas no limite HTTP da FakeStore. Cubra execução normal, agendamento, callbacks, retry e falha definitiva, catálogo vazio e inválido, categorias novas e ausentes, limite de concorrência, XCom pequeno, reprocessamento, rollback, API e painel. Documente um comando para rodar a suíte e registre os resultados por cenário.
+- Na #12, documente a inicialização dos módulos e o reprocessamento, confira o acesso de leitura para o avaliador e prepare a postagem do link no canal da atividade.
+
+- Abra uma branch por issue a partir de `main` atualizada. Revise a alteração antes de abrir o PR para `main`. Após aprovação e verificações aplicáveis, faça o merge e encerre a issue. Use `main` como única branch permanente.
+- Reúna comandos, resultados observados, evidências e links em `docs/evidencias.md`. O autor compartilhará com o professor o link do repositório e o do documento.
