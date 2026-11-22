@@ -1,0 +1,33 @@
+# Autor: Christiano Henrique Carrilho Lopes da Silva
+# Código de pessoa: 1691353
+# Matrícula: 262987
+# Override do cenário E2E do pipeline: acrescenta a FakeStore controlada e reduz o atraso de
+# retentativa de Buscar Produtos para 2 segundos, para que retry e falha definitiva caibam no
+# teste. O valor de produção (60 s) é conferido no próprio cenário sem esta variável.
+
+x-airflow-e2e-env: &airflow-e2e-env
+  SHOPBRASIL_BUSCA_RETRY_DELAY_SEGUNDOS: "2"
+
+services:
+  fakestore:
+    image: apache/airflow:3.4.0-python3.12
+    entrypoint: ["python", "/fakestore/servidor.py"]
+    volumes:
+      - ./e2e/fakestore:/fakestore:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/_saude')"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  airflow-init:
+    environment: *airflow-e2e-env
+  airflow-apiserver:
+    environment: *airflow-e2e-env
+  airflow-scheduler:
+    environment: *airflow-e2e-env
+    depends_on:
+      fakestore:
+        condition: service_healthy
+  airflow-dag-processor:
+    environment: *airflow-e2e-env

@@ -10,7 +10,7 @@ name: Arquitetura
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, integracao-backlog]
 
 permissions:
   contents: read
