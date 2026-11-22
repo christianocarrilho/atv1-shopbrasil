@@ -200,3 +200,29 @@ O cenário chama o caso de uso diretamente porque o DAG só passa a acionar a pu
 | Lint de arquitetura | `python3 qualidade/lint_arquitetura.py` | `OK: 15 arquivo(s) Python verificado(s), nenhuma violação de arquitetura.` |
 
 Revisão cruzada do Claude sobre 6e8763c: aprovado, sem bloqueantes. A transação é única: o bloco `with conexao` do psycopg2 faz commit ao sair e rollback em qualquer exceção. O conjunto do dia é apagado e reinserido. Coleção vazia e código repetido são recusados antes de abrir a transação. O ponto de extensão `etapas_adicionais` compartilha o cursor com a #18. A aplicação não tem SQL nem Airflow. Na integração com a #13 (b2f180c), as duas fábricas ficaram em `composicao.py`; o adaptador PostgreSQL é importado dentro da função, para que os testes unitários não dependam do provider. Sobre essa revisão: `e2e/publicacao/executar.sh` terminou com código 0 e 26 verificações PASS; testes unitários `OK`; lint `OK: 18 arquivo(s) Python verificado(s), nenhuma violação de arquitetura.`
+
+## #9 — Consultas Web/API para snapshot e evolução
+
+Validação executada em 22 nov. 2026, com Docker 29.9.2, Docker Compose v5.6.1 e Python 3.14.7 (macOS), sobre a revisão 5f5611e (base `integracao-backlog` c7e5d74). O desenho das camadas e o contrato HTTP para as #19–#21 estão no [README da web](../web/README.md).
+
+Comando: `e2e/web/executar.sh`. Ele constrói a imagem `web/Dockerfile` (`python:3.12.16-slim`, dependências fixadas) e sobe `postgres`, `db-init` e `web` no projeto Compose `shopbrasil-e2e-web-<timestamp>` (porta padrão 18110, só em 127.0.0.1), sem o Airflow. Os dados de teste são gravados pela conta administrativa ([fixtures/snapshot.sql](../e2e/web/fixtures/snapshot.sql)) e as rotas são consultadas pela porta publicada. Duração observada: 14 s. Código de saída 0, 20 verificações PASS.
+
+| Cenário | Resultado | Observado |
+|---|---|---|
+| W0 subida | PASS | `up --build --wait` de `web` com dependências; serviços criados: `db-init postgres web`; porta `127.0.0.1:18110` |
+| W1 credenciais do contêiner | PASS | `SHOPBRASIL_DB_READER_USER=shopbrasil_reader`; nenhuma variável `WRITER`, `POSTGRES_PASSWORD` ou `AIRFLOW` |
+| W2 snapshot vazio | PASS | `GET /api/metricas/ultima-data` → `{"data":null}` |
+| W3 data com métricas | PASS | fixture `3|4|1` (categorias, snapshot, histórico); `GET /api/metricas?data=2026-11-22` → `electronics` `10.00/10.00/10.01/3` e `jewelery` `10.01/10.00/10.01/2`, em ordem de código, com descrição |
+| W4 última data e precisão | PASS | `{"data":"2026-11-24"}`; preços `"1234567890.12"`, `"0.10"`, `"9999999999.99"` como strings, sem float |
+| W5 data sem registros | PASS | `{"data":"2026-11-21","vazia":true,"metricas":[]}` |
+| W6 série | PASS | `electronics` de 19/11 a 24/11: seis pontos em ordem, `null` em 19, 21, 23 e 24, `"20.00"` em 20 e `"10.00"` em 22; o valor `99.99` do histórico de 21/11 não aparece; intervalo de um dia inclusivo; `men's clothing` (apóstrofo, sem métricas) só com `null` |
+| W7 categorias | PASS | `electronics`, `jewelery`, `men's clothing`, em ordem de código |
+| W8 erros e documentação | PASS | `422` para `2026-02-30` e para `data` ausente (`loc` `["query","data"]`, `data inválida '2026-02-30'; use AAAA-MM-DD`), `400` para intervalo invertido, `404` para `toys`; `/openapi.json` com as quatro rotas |
+| W9 somente leitura | PASS | no contêiner da web, com a configuração da composição: `current_user` = `shopbrasil_reader`; `INSERT`, `UPDATE`, `DELETE`, `TRUNCATE` e `CREATE TABLE` → `InsufficientPrivilege`; contagens inalteradas (`3|4|1`); o repositório abre a sessão com `transaction_read_only = on` |
+
+| Verificação | Comando | Resultado observado |
+|---|---|---|
+| Testes da web no contêiner | `docker compose run --rm --no-deps web python -m unittest discover -s tests -t .` (no E2E, `docker run --rm shopbrasil-web:<tag> ...`) | `Ran 33 tests ... OK` |
+| Testes da web no host (só biblioteca padrão) | `python3 -m unittest discover -s web/tests -t web` | `Ran 33 tests ... OK (skipped=21)`: os 12 de `consultas` rodam; apresentação, composição e infraestrutura exigem FastAPI e psycopg |
+| Testes do pipeline e do lint | `python3 -m unittest discover -s pipeline/tests -t pipeline`; `python3 -m unittest discover -s qualidade/tests` | `Ran 51 tests ... OK`; `Ran 38 tests ... OK` |
+| Lint de arquitetura | `python3 qualidade/lint_arquitetura.py` | `OK: 35 arquivo(s) Python verificado(s), nenhuma violação de arquitetura.` |
