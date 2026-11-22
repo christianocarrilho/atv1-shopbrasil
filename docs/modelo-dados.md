@@ -4,7 +4,7 @@
 Código de pessoa: 1691353
 Matrícula: 262987
 
-Este documento descreve o DDL de [db/schema.sql](../db/schema.sql): nomes finais, tipos, chaves e restrições das três tabelas analíticas, e o que a #15 precisa respeitar ao transportar as métricas até a publicação. O comportamento aprovado está na [especificação](especificacao.md#modelo-de-dados--3-15-17-e-18).
+Este documento descreve o DDL de [db/schema.sql](../db/schema.sql): nomes finais, tipos, chaves e restrições das três tabelas analíticas, e o contrato da #15 para transportar as métricas até a publicação. O comportamento aprovado está na [especificação](especificacao.md#modelo-de-dados--3-15-17-e-18).
 
 ## Aplicação
 
@@ -61,22 +61,42 @@ As duas tabelas de métricas têm as mesmas regras:
 - `quantidade_produtos > 0` (`*_quantidade_ck`). Uma categoria entra no resultado do dia só quando tem produtos;
 - `0 <= preco_minimo <= preco_medio <= preco_maximo` (`*_precos_ck`).
 
-## Contrato com a #15
+## Contrato das métricas — #15
 
-A saída consolidada de cada categoria leva o código da categoria e as quatro métricas. A #17 resolve `codigo` para `categoria_id` na publicação.
+Os tipos e o cálculo ficam em [`dominio/metricas.py`](../pipeline/shopbrasil_pipeline/dominio/metricas.py), sem Airflow, HTTP ou SQL. A saída de cada categoria leva o código da categoria e as quatro métricas. A #17 resolve `codigo_categoria` para `categoria_id` na publicação.
 
-| Campo do contrato | Coluna | Tipo no banco | Transporte sugerido |
+### Entrada de uma categoria (`PrecosCategoria`)
+
+```json
+{"codigo_categoria": "electronics", "precos": ["10.00", "10.00", "10.01"]}
+```
+
+`codigo_categoria` é o valor de `category` observado na coleta, texto não vazio. `precos` é uma lista não vazia de strings decimais finitas, sem arredondamento prévio.
+
+### Saída de uma categoria (`MetricasCategoria`)
+
+```json
+{"codigo_categoria": "electronics", "preco_medio": "10.00", "preco_minimo": "10.00", "preco_maximo": "10.01", "quantidade_produtos": 3}
+```
+
+| Campo do contrato | Coluna | Tipo no banco | Transporte |
 |---|---|---|---|
-| código da categoria | `categoria.codigo` | `text` | string |
-| preço médio | `preco_medio` | `numeric(12,2)` | string decimal com duas casas, ex. `"10.00"` |
-| preço mínimo | `preco_minimo` | `numeric(12,2)` | idem |
-| preço máximo | `preco_maximo` | `numeric(12,2)` | idem |
-| quantidade | `quantidade_produtos` | `integer` | inteiro |
+| `codigo_categoria` | `categoria.codigo` | `text` | string |
+| `preco_medio` | `preco_medio` | `numeric(12,2)` | string decimal com duas casas, ex. `"10.00"` |
+| `preco_minimo` | `preco_minimo` | `numeric(12,2)` | idem |
+| `preco_maximo` | `preco_maximo` | `numeric(12,2)` | idem |
+| `quantidade_produtos` | `quantidade_produtos` | `integer` | inteiro |
 
+A saída consolidada da #16 é a lista desses objetos, um por categoria. A data de referência e o `run_id` vêm do XCom de `preparacao.identificar` (`{"run_id": ..., "data_referencia": "AAAA-MM-DD"}`), entregue pela #4.
+
+### Regras
+
+- **Sem float.** O cálculo recebe `Decimal` e recusa `float`, `bool`, `NaN` e infinito. O XCom do Airflow serializa em JSON, que transformaria números em float; por isso os preços trafegam como strings decimais. As conversões ficam nas fronteiras: `para_xcom()` e `de_xcom()` dos tipos do domínio. O adaptador HTTP da #13 lê o JSON da FakeStore com `parse_float=Decimal`, e a publicação da #17 passa `Decimal` ao `psycopg2`.
+- **Arredondamento.** A média é calculada sobre os preços recebidos, com 50 dígitos de precisão, e arredondada uma única vez para duas casas com `ROUND_HALF_UP`. É o mesmo critério do `numeric` do PostgreSQL para valores positivos, então o banco grava exatamente o valor calculado. Exemplo de empate: `10.00` e `10.01` têm média `10.005`, que vira `10.01` (com `ROUND_HALF_EVEN` seria `10.00`). Exemplo da issue: `10.00`, `10.00` e `10.01` dão média `10.00`, mínimo `10.00`, máximo `10.01` e quantidade `3`.
+- **Mínimo e máximo.** São preços observados e recebem só a escala de duas casas da coluna, com o mesmo modo. Com preços de duas casas, como os da FakeStore, o valor não muda. A média arredondada fica sempre entre mínimo e máximo, o que satisfaz `*_precos_ck`.
 - **Precisão.** `numeric(12,2)` aceita de `0.00` a `9999999999.99` nas colunas de preço, pela restrição de mínimo não negativo. Um valor com mais de dez dígitos inteiros falha com `numeric field overflow` e desfaz a publicação. A #6 rejeita preço negativo antes do cálculo, e a restrição do banco fica como última barreira.
-- **Escala.** O tipo arredonda valores com mais de duas casas, com empate para longe do zero (`10.005` vira `10.01`). Para que o banco grave exatamente o valor calculado, a #15 deve entregar os quatro preços já quantizados em duas casas, e a média arredondada uma única vez no domínio. O modo de arredondamento da média é decisão da #15.
 - **Leitura.** O PostgreSQL devolve `numeric`. O `psycopg2` do `PostgresHook` e o `psycopg` da web convertem esse valor em `Decimal`, então snapshot, histórico e painel mostram o mesmo valor publicado.
-- **Datas.** `data_referencia` e `data_execucao` são `date`. O transporte pode usar ISO 8601 (`"2026-11-22"`).
+- **Datas.** `data_referencia` e `data_execucao` são `date` e trafegam em ISO 8601 (`"2026-11-22"`).
 
 ## Verificação
 

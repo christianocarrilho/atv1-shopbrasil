@@ -95,3 +95,18 @@ Cenário de ambiente afetado, `e2e/ambiente/executar.sh`, sobre o mesmo patch: 2
 Lint de arquitetura sobre o mesmo patch, com Python 3.14.7: `python3 qualidade/lint_arquitetura.py --listar` retornou `OK: 0 arquivo(s) Python verificado(s), nenhuma violação de arquitetura.` e saída 0; `python3 -m unittest discover -s qualidade/tests` retornou `Ran 38 tests ... OK`. O patch não tem código Python.
 
 Revisão cruzada do Claude sobre a base `main` 9e395db com o patch da #3 e o ajuste de documentação da revisão, em 22 nov. 2026: `e2e/esquema/executar.sh` terminou com código 0 e todas as 36 verificações PASS; `e2e/ambiente/executar.sh` terminou com código 0 e 29 verificações PASS, com A6 `aplicado`, A7 `violações/tabelas = 0/4` e A11 com 4 avisos `already exists`; lint `OK: 0 arquivo(s) Python verificado(s)` e testes do lint `OK`. Decisões conferidas contra a especificação: `data_execucao` é `date` com a data de referência da run, no sentido de data lógica do Airflow; `descricao` é obrigatória e recebe o código no cadastro automático; as restrições de quantidade positiva e de preços ordenados e não negativos valem para snapshot e histórico, e a #6 rejeita preço negativo antes do cálculo.
+
+## #15 — Contrato e cálculo das métricas
+
+Validação executada em 22 nov. 2026, com Python 3.14.7 (macOS), sobre a base `main` bba4730 com o patch da #15. O contrato está em [modelo-dados.md](modelo-dados.md#contrato-das-métricas--15).
+
+| Verificação | Comando | Resultado observado |
+|---|---|---|
+| Testes do domínio | `python3 -m unittest discover -s pipeline/tests -t pipeline` | `Ran 14 tests ... OK` |
+| Exemplo da issue | `test_exemplo_da_issue` | `10.00`, `10.00`, `10.01` → média `10.00`, mínimo `10.00`, máximo `10.01`, quantidade `3` |
+| Empate | `test_empate_arredonda_para_cima` | média exata `10.005` → `10.01` (`ROUND_HALF_UP`) |
+| Arredondamento único | `test_arredonda_uma_unica_vez` | `0.004`, `0.004`, `0.007` → `0.01`; arredondar cada preço antes daria `0.00` |
+| Sem float | `EntradaInvalidaTest`, `TransporteXcomTest` | `float`, `bool`, `NaN`, infinito, número no lugar de string e texto não decimal recusados; ida e volta por `json.dumps`/`json.loads` preserva os valores |
+| Lint de arquitetura | `python3 qualidade/lint_arquitetura.py` | `OK: 5 arquivo(s) Python verificado(s), nenhuma violação de arquitetura.` |
+
+Sem cenário E2E nesta issue: o cálculo ainda não é acionado pelo DAG. A #16 integra o contrato às tasks mapeadas e acrescenta o cenário ao `e2e/pipeline/executar.sh`.
