@@ -5,3 +5,18 @@ Código de pessoa: 1691353
 Matrícula: 262987
 
 Orquestra e executa a coleta, a análise e a publicação das métricas.
+
+## DAG `shopbrasil_metricas`
+
+O DAG fica em [dags/shopbrasil_metricas.py](dags/shopbrasil_metricas.py). Roda diariamente às 06:00 em `America/Sao_Paulo` (`CronTriggerTimetable`), com `start_date` em 1º nov. 2026 e `catchup=False`. As etapas ficam nos TaskGroups `preparacao`, `ingestao`, `analise` e `publicacao`, ligadas pelas chamadas TaskFlow.
+
+A data de referência é a data civil, em Brasília, da data lógica da run. No Airflow 3.4 a data lógica de uma run agendada é a própria ocorrência das 06:00, sem intervalo de dados. A regra fica em `shopbrasil_pipeline/dominio/calendario.py` e não usa o relógio. Uma run sem data lógica falha em `preparacao.identificar`.
+
+Para reprocessar, limpe as tasks da própria run (na interface, *Clear*, ou `airflow tasks clear shopbrasil_metricas -s <data lógica> -e <data lógica> -y`). O `run_id` e a data de referência são preservados. Não dispare uma run nova para refazer um dia.
+
+## Testes
+
+```bash
+python3 -m unittest discover -s pipeline/tests -t pipeline   # unitários, só biblioteca padrão
+e2e/pipeline/executar.sh                                     # E2E com Airflow e PostgreSQL em Docker
+```

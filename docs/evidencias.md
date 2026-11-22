@@ -114,3 +114,27 @@ Validação executada em 22 nov. 2026, com Python 3.14.7 (macOS), sobre a base `
 Revisão cruzada do Kiro sobre cf4092d: aprovado com ajustes. Ajustes aplicados: conversão de preços inteiros na fronteira (`parse_int=Decimal`), validação de `MetricasCategoria`, um item por código na saída consolidada, média exata como fração com um único arredondamento e remoção da ressalva sobre valores positivos.
 
 Sem cenário E2E nesta issue: o cálculo ainda não é acionado pelo DAG. A #16 integra o contrato às tasks mapeadas e acrescenta o cenário ao `e2e/pipeline/executar.sh`.
+
+## #4 — DAG TaskFlow, agenda e data de referência
+
+Validação executada em 22 nov. 2026, com Docker 29.9.2 e Docker Compose v5.6.1, sobre a revisão 9a957f0 (base `main` bba4730, com o esquema da #3) e repetida na revisão final 511e988 (base `main` db55d81), com o mesmo resultado. O DAG está descrito no [README do pipeline](../pipeline/README.md#dag-shopbrasil_metricas).
+
+Comando: `e2e/pipeline/executar.sh`. Ele sobe o Airflow e o PostgreSQL no projeto Compose `shopbrasil-e2e-pipeline-<timestamp>`, com senhas aleatórias e os DAGs reais de `pipeline/dags`, e remove contêineres e volumes ao final. Duração observada: cerca de 1 min. Código de saída 0, 19 verificações PASS.
+
+| Cenário | Resultado | Observado |
+|---|---|---|
+| P0 subida | PASS | `up --wait` dos serviços do Airflow e dependências |
+| P1 importação | PASS | DAG `shopbrasil_metricas` registrado; 0 erros de importação |
+| P2 estrutura | PASS | TaskGroups `analise`, `ingestao`, `preparacao`, `publicacao`; arestas `preparacao.identificar>ingestao.buscar_produtos`, `ingestao.buscar_produtos>analise.consolidar`, `analise.consolidar>publicacao.publicar`, `preparacao.identificar>publicacao.publicar` |
+| P3 agenda | PASS | `timetable_summary` `0 6 * * *`, fuso `America/Sao_Paulo`; `start_date` `2026-11-01T03:00:00+00:00` (00:00 em Brasília); `catchup=False` |
+| P3 catchup | PASS | ao despausar, uma única run `scheduled`, a da ocorrência das 06:00 mais recente (`scheduled__2026-11-22T09:00:00+00:00`), sem as retroativas desde 1º nov.; `next_dagrun` às 06:00 de Brasília do dia seguinte |
+| P4 run agendada real | PASS | `success`; XCom de `preparacao.identificar` = `data_referencia` `2026-11-22` |
+| P4 run da ocorrência de 21/11 | PASS | executada em 22/11 com data lógica `2026-11-21T09:00:00+00:00`; `data_referencia` `2026-11-21`, não a data do relógio; 4 tasks `success` |
+| P5 reprocessamento | PASS | `airflow tasks clear` da mesma run: 1 run para a data lógica, 4 tasks com a 2ª tentativa `success`, mesmo `run_id` e `data_referencia` `2026-11-21` |
+| P6 run sem data lógica | PASS | run `failed` com `OcorrenciaAusenteError`; nenhuma task seguinte executada |
+
+Observações do Airflow 3.4 usadas pelo cenário: cada tentativa é uma linha de `task_instance`, e o XCom fica em `xcom_v2`, ligado pela `task_instance_id`.
+
+Testes unitários na revisão final, já com os da #15: `python3 -m unittest discover -s pipeline/tests -t pipeline` retornou `Ran 30 tests ... OK`. Lint: `OK: 10 arquivo(s) Python verificado(s), nenhuma violação de arquitetura.`
+
+Revisão cruzada do Kiro sobre 9a957f0: aprovado com ajustes, sem bloqueantes; o Kiro também rodou o E2E com 19 PASS. Ajustes aplicados: `trap` registrado antes de criar o arquivo de senhas, logs removidos quando não há falha, `mktemp` com caminho completo no macOS, porta padrão própria do cenário (18090), P5 lendo o XCom da 2ª tentativa, fuso da agenda vindo do domínio e comentários sobre a API interna do P6 e a janela das 06:00. Mantido como está: runs manuais com data lógica arbitrária publicam para essa data; o README orienta a reprocessar limpando as tasks da run original. Na execução final, nenhum temporário `shopbrasil-e2e-*` ficou em `$TMPDIR`.
