@@ -12,7 +12,7 @@ Organiza o serviço de leitura das métricas e o dashboard. A #9 entrega a API J
 |---|---|---|
 | `consultas` | [modelos.py](shopbrasil_web/consultas/modelos.py), [repositorio.py](shopbrasil_web/consultas/repositorio.py), [casos_uso.py](shopbrasil_web/consultas/casos_uso.py) | Modelos de leitura, contrato `RepositorioMetricas` e casos de uso. Só biblioteca padrão, sem HTTP nem PostgreSQL. |
 | `infraestrutura` | [postgres.py](shopbrasil_web/infraestrutura/postgres.py) | `RepositorioMetricasPostgres`: psycopg 3, conta de leitura, transação somente leitura, SQL só sobre `metricas_categoria` e `categoria`. |
-| `apresentacao` | [aplicacao.py](shopbrasil_web/apresentacao/aplicacao.py), [controllers.py](shopbrasil_web/apresentacao/controllers.py), [modelos_http.py](shopbrasil_web/apresentacao/modelos_http.py) | FastAPI, validação dos filtros, tradução para JSON. Sem SQL. |
+| `apresentacao` | [aplicacao.py](shopbrasil_web/apresentacao/aplicacao.py), [controllers.py](shopbrasil_web/apresentacao/controllers.py), [modelos_http.py](shopbrasil_web/apresentacao/modelos_http.py), [pagina.py](shopbrasil_web/apresentacao/pagina.py), [templates/](shopbrasil_web/apresentacao/templates/) | FastAPI, validação dos filtros, tradução para JSON e página do painel (Jinja2). Sem SQL. |
 | composição | [composicao.py](shopbrasil_web/composicao.py) | Lê o ambiente, cria repositório, casos de uso e aplicação (`criar_app`, usada pelo uvicorn com `--factory`). |
 
 O pacote não importa `pipeline/`: o contrato entre os módulos é o esquema em [db/schema.sql](../db/schema.sql). As leituras usam só o snapshot diário; o histórico por run é demonstrado por consulta ao banco.
@@ -78,6 +78,15 @@ Série do preço médio da categoria no intervalo **inclusivo** `[inicio, fim]`,
 | `422` | Parâmetro obrigatório ausente, data fora de `AAAA-MM-DD` ou inexistente (`2026-02-30`) | `{"detail": [{"loc": ["query", "data"], "msg": "data inválida '2026-02-30'; use AAAA-MM-DD", "type": "data_invalida"}]}` (formato de validação do FastAPI) |
 | `400` | `inicio` depois de `fim` ou intervalo maior que 366 dias | `{"detail": "intervalo inválido: início 2026-11-24 depois do fim 2026-11-20"}` |
 | `404` | Categoria não cadastrada em `/api/evolucao` | `{"detail": "categoria 'toys' não cadastrada"}` |
+
+## Painel — #19
+
+`GET /` renderiza o painel no servidor com Jinja2, usando os mesmos casos de uso e modelos HTTP da API.
+
+- Sem `data`, abre na data mais recente com métricas (`ultima-data`). Selecionar outra data no campo recarrega a página com `?data=AAAA-MM-DD`.
+- A tabela mostra categoria, preço médio, mínimo, máximo e quantidade de produtos, com os mesmos valores do JSON. Data sem registros exibe “Sem métricas para esta data”; sem nenhuma publicação, “Nenhuma métrica publicada até o momento”.
+- A coleção carregada fica embutida como JSON em `<script type="application/json" id="metricas-dados">`, igual a `/api/metricas?data=…`, para as barras da #20. A seção `#evolucao` é o ponto de inserção da linha da #21.
+- Data inválida responde `422`, como na API. A página fica fora do OpenAPI.
 
 ## Configuração e execução
 
