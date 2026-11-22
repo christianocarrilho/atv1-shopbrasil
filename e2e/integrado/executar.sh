@@ -121,12 +121,28 @@ verificar "N4 evolução de toys" "2026-11-10=None 2026-11-11=67.76 2026-11-12=N
 verificar "N4 série do painel igual à API" "$(curl -sS "$BASE/api/evolucao?categoria=toys&inicio=2026-11-10&fim=2026-11-12" | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin), ensure_ascii=False, separators=(",", ":"), sort_keys=True))')" \
   "$(curl -sS "$BASE/?categoria=toys&inicio=2026-11-10&fim=2026-11-12" | python3 -c 'import json,re,sys; p=sys.stdin.read(); print(json.dumps(json.loads(re.search(r"id=\"evolucao-dados\">(.*?)</script>", p, re.S).group(1)), ensure_ascii=False, separators=(",", ":"), sort_keys=True))')"
 
-# N5. Reprocessar a run de 21/11: mesma data de referência, sem duplicatas, valores estáveis.
+# N5. Reprocessar a run de 11/11: mesma data de referência, sem duplicatas, valores estáveis.
 ANTES="$(snapshot_do_dia 2026-11-11)|$(historico_da_run "$RUN_21")"
 fakestore '{"respostas": [{"catalogo": "com_nova"}]}'
-airflow_cli tasks clear "$DAG_ID" -s "2026-11-11T09:00:00+00:00" -e "2026-11-11T09:00:00+00:00" -y >/dev/null 2>&1
-sleep 3
+tentativa_publicar() {
+  admin_sql airflow "SELECT coalesce(max(try_number), 0) || ':' || coalesce((SELECT state FROM task_instance
+      WHERE dag_id = '$DAG_ID' AND run_id = '$RUN_21' AND task_id = 'publicacao.publicar' ORDER BY try_number DESC LIMIT 1), '')
+    FROM task_instance WHERE dag_id = '$DAG_ID' AND run_id = '$RUN_21' AND task_id = 'publicacao.publicar'"
+}
+TENTATIVA_ANTES="$(tentativa_publicar)"
+if airflow_cli tasks clear "$DAG_ID" -s "2026-11-11T09:00:00+00:00" -e "2026-11-11T09:00:00+00:00" -y >"$LOG_DIR/clear.log" 2>&1; then
+  registrar PASS "N5 tasks da run limpas" "airflow tasks clear concluído"
+else
+  registrar FAIL "N5 tasks da run limpas" "ver $LOG_DIR/clear.log"
+fi
+# A run volta a executar: espera sair de success antes de aguardar o novo estado final.
+for _ in $(seq 1 20); do
+  [[ "$(admin_sql airflow "SELECT state FROM dag_run WHERE dag_id = '$DAG_ID' AND run_id = '$RUN_21'")" != success ]] && break
+  sleep 1
+done
 verificar "N5 run reprocessada" "success" "$(aguardar_run "$DAG_ID" "$RUN_21")"
+# Exige uma nova tentativa bem-sucedida da publicação, para não aprovar um reprocessamento que não ocorreu.
+verificar "N5 nova tentativa da publicação" "$(( ${TENTATIVA_ANTES%%:*} + 1 )):success" "$(tentativa_publicar)"
 verificar "N5 data de referência estável" "$RUN_21|2026-11-11" "$(admin_sql airflow "SELECT x.value->>'run_id' || '|' || (x.value->>'data_referencia')
   FROM xcom_v2 x JOIN task_instance ti ON ti.id = x.task_instance_id
   WHERE ti.dag_id = '$DAG_ID' AND ti.run_id = '$RUN_21' AND ti.task_id = 'preparacao.identificar' AND x.key = 'return_value'
@@ -136,11 +152,17 @@ verificar "N5 sem duplicatas por data+categoria e run+categoria" "1|1" \
   "$(leitor_sql "SELECT max(n) FROM (SELECT count(*) n FROM metricas_categoria GROUP BY data_referencia, categoria_id) t")|$(leitor_sql "SELECT max(n) FROM (SELECT count(*) n FROM metricas_categoria_historico GROUP BY run_id, categoria_id) t")"
 
 # N6. Falha definitiva da FakeStore numa nova ocorrência preserva tudo o que já foi publicado.
-CONTAGENS="$(leitor_sql "SELECT (SELECT count(*) FROM metricas_categoria) || '|' || (SELECT count(*) FROM metricas_categoria_historico)")"
+ESTADO_ANTES_N6="$(estado_publicado)"
 fakestore '{"respostas": [{"status": 500}, {"status": 500}, {"status": 500}, {"status": 500}]}'
 airflow_cli dags trigger "$DAG_ID" --logical-date "2026-11-13T09:00:00+00:00" --run-id "e2e__integrado_falha" >/dev/null 2>&1
 verificar "N6 run com falha definitiva" "failed" "$(aguardar_run "$DAG_ID" "e2e__integrado_falha" 150)"
-verificar "N6 dados e painel preservados" "$CONTAGENS|$DATA_AGENDADA" \
-  "$(leitor_sql "SELECT (SELECT count(*) FROM metricas_categoria) || '|' || (SELECT count(*) FROM metricas_categoria_historico)")|$(json /api/metricas/ultima-data | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"])')"
+verificar "N6 dados (valores e xmin) e painel preservados" "$ESTADO_ANTES_N6|$DATA_AGENDADA" \
+  "$(estado_publicado)|$(json /api/metricas/ultima-data | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"])')"
+
+# N7. Painel num Chromium real sobre os dados publicados pelo DAG: barras de 11/11 iguais à tabela
+# (com toys), troca de data para um dia sem publicação e linha de toys com lacunas nos outros dias.
+verificar "N7 painel no Chromium com dados do DAG" \
+  "4.6.1|86.50,695.00,66.13,67.76,9.85|86.5,695,66.13,67.76,9.85@5|data=2026-11-09;Sem métricas para esta data;Sem métricas para esta data;False|None,None,67.76,None,None@5|spanGaps=False|erros=0" \
+  "$(navegador_painel 2026-11-11 2026-11-09 toys 2026-11-09 2026-11-13)"
 
 resumo
