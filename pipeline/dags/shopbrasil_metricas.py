@@ -14,15 +14,16 @@ log da própria tentativa, e o DAG avisa a falha da run inteira, inclusive a mar
 
 A agenda usa ``CronTriggerTimetable`` explícito: no Airflow 3.4 a data lógica de cada run é a
 própria ocorrência das 06:00 em ``America/Sao_Paulo``, sem intervalo de dados a deslocar a data.
-Buscar Produtos (#13) usa a FakeStore pela composição e ``ValidarProdutosOperator`` (#6) confere
-o catálogo antes do cálculo. As tasks de análise e publicação são o esqueleto que #16 e #17
-substituem.
+Trechos: linear (preparação → Buscar Produtos (#13) → ``ValidarProdutosOperator`` (#6) →
+agrupamento), fan-out (``calcular_metricas.expand`` por categoria observada, no ``ecommerce_pool``)
+e fan-in (``consolidar``), seguido da publicação transacional (#17/#18) pela composição (#16).
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import time
 from datetime import timedelta
 
 import pendulum
@@ -39,8 +40,11 @@ from shopbrasil_pipeline.aplicacao.alertas import (
     notificar_retry,
     notificar_sucesso,
 )
+from shopbrasil_pipeline.aplicacao.analise import agrupar_por_categoria, consolidar_metricas
 from shopbrasil_pipeline.aplicacao.catalogo import coletar_catalogo
-from shopbrasil_pipeline.aplicacao.execucao import identificar_execucao
+from shopbrasil_pipeline.aplicacao.execucao import Execucao, identificar_execucao
+from shopbrasil_pipeline.dominio.metricas import MetricasCategoria, PrecosCategoria
+from shopbrasil_pipeline.dominio.metricas import calcular_metricas as calcular_categoria
 from shopbrasil_pipeline.dominio.calendario import FUSO_REFERENCIA
 
 DAG_ID = "shopbrasil_metricas"
@@ -59,6 +63,11 @@ BUSCA_RETRIES = 3
 # 2N, com N = atraso inicial × 2^(n−1).
 BUSCA_BACKOFF = 2.0
 BUSCA_RETRY_DELAY = timedelta(seconds=int(os.environ.get("SHOPBRASIL_BUSCA_RETRY_DELAY_SEGUNDOS", "60")))
+
+# Tasks mapeadas por categoria dividem o pool de dois slots provisionado na #2.
+POOL_CALCULO = "ecommerce_pool"
+# Atraso artificial por task mapeada, só no override E2E, para tornar observável o limite do pool.
+CALCULO_ATRASO_SEGUNDOS = float(os.environ.get("SHOPBRASIL_CALCULO_ATRASO_SEGUNDOS", "0"))
 
 log = logging.getLogger(__name__)
 
@@ -156,20 +165,43 @@ def shopbrasil_metricas():
         return validar.output
 
     @task_group(group_id="analise")
-    def analise(produtos: dict[str, object]):
+    def analise(validados: dict[str, object]):
         @task
-        def consolidar(produtos: dict[str, object]) -> dict[str, object]:
-            # Esqueleto da #4: a #16 agrupa, expande por categoria e consolida pela #15.
-            return {"etapa": "analise", "produtos": len(produtos["produtos"])}
+        def agrupar_por_categoria_task(validados: dict[str, object]) -> list[dict[str, object]]:
+            # Uma entrada por código observado na coleta; nenhuma lista fixa de categorias.
+            grupos = agrupar_por_categoria(validados["produtos"])
+            log.info("Categorias para o fan-out: %s", [g.codigo_categoria for g in grupos])
+            return [g.para_xcom() for g in grupos]
 
-        return consolidar(produtos)
+        @task(pool=POOL_CALCULO)
+        def calcular_metricas(entrada: dict[str, object]) -> dict[str, object]:
+            if CALCULO_ATRASO_SEGUNDOS:
+                time.sleep(CALCULO_ATRASO_SEGUNDOS)
+            return calcular_categoria(PrecosCategoria.de_xcom(entrada)).para_xcom()
+
+        @task
+        def consolidar(grupos: list[dict[str, object]], resultados) -> list[dict[str, object]]:
+            # Fan-in: exige exatamente um resultado para cada categoria agrupada.
+            metricas = consolidar_metricas(
+                (MetricasCategoria.de_xcom(r) for r in resultados),
+                esperadas=[g["codigo_categoria"] for g in grupos],
+            )
+            return [m.para_xcom() for m in metricas]
+
+        grupos = agrupar_por_categoria_task.override(task_id="agrupar_por_categoria")(validados)
+        # Fan-out: uma instância mapeada por categoria, limitada pelo ecommerce_pool.
+        resultados = calcular_metricas.expand(entrada=grupos)
+        return consolidar(grupos, resultados)
 
     @task_group(group_id="publicacao")
-    def publicacao(execucao: dict[str, str], metricas: dict[str, object]):
+    def publicacao(execucao: dict[str, str], metricas: list[dict[str, object]]):
         @task
-        def publicar(execucao: dict[str, str], metricas: dict[str, object]) -> dict[str, str]:
-            # Esqueleto da #4: a #17 e a #18 publicam snapshot e histórico na mesma transação.
-            return {**execucao, "etapa": "publicacao"}
+        def publicar(execucao: dict[str, str], metricas: list[dict[str, object]]) -> dict[str, object]:
+            resultado = composicao.publicar_snapshot().executar(
+                Execucao.de_xcom(execucao), [MetricasCategoria.de_xcom(m) for m in metricas]
+            )
+            log.info("Snapshot publicado: %s", resultado.para_xcom())
+            return resultado.para_xcom()
 
         return publicar(execucao, metricas)
 
