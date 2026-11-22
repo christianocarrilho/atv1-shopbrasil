@@ -3,10 +3,13 @@
 # Matrícula: 262987
 # Override do cenário E2E do pipeline: acrescenta a FakeStore controlada e reduz o atraso de
 # retentativa de Buscar Produtos para 2 segundos, para que retry e falha definitiva caibam no
-# teste. O valor de produção (60 s) é conferido no próprio cenário sem esta variável.
+# teste, e atrasa o cálculo mapeado para observar o pool. Os valores de produção (60 s e 0 s) são
+# conferidos no próprio cenário sem estas variáveis.
 
 x-airflow-e2e-env: &airflow-e2e-env
   SHOPBRASIL_BUSCA_RETRY_DELAY_SEGUNDOS: "2"
+  # Mantém cada task mapeada ocupada por 3 s para que o limite de dois slots do pool seja observável.
+  SHOPBRASIL_CALCULO_ATRASO_SEGUNDOS: "3"
 
 services:
   fakestore:
