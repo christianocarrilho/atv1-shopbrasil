@@ -50,6 +50,10 @@ class CalcularMetricasTest(unittest.TestCase):
         self.assertEqual(resultado.para_xcom()["preco_medio"], "695.00")
         self.assertEqual(resultado.quantidade_produtos, 1)
 
+    def test_media_exata_sem_duplo_arredondamento(self):
+        # Média exata 1/3 + 0.005 fica acima do empate: arredonda para cima, nunca no empate.
+        self.assertEqual(calcular_metricas(precos("x", "0.01", "0.01", "0.005")).preco_medio, Decimal("0.01"))
+
     def test_media_entre_minimo_e_maximo(self):
         resultado = calcular_metricas(precos("x", "109.95", "22.3", "55.99", "15.99"))
         self.assertLessEqual(resultado.preco_minimo, resultado.preco_medio)
@@ -57,7 +61,54 @@ class CalcularMetricasTest(unittest.TestCase):
         self.assertEqual(resultado.preco_medio, Decimal("51.06"))
 
 
+class FronteiraJsonTest(unittest.TestCase):
+    def test_precos_inteiros_e_fracionarios_da_fakestore(self):
+        # A FakeStore devolve preços inteiros (695) e fracionários (22.3) no mesmo catálogo.
+        produtos = json.loads('[{"price": 695}, {"price": 22.3}]', parse_float=Decimal, parse_int=Decimal)
+        entrada = PrecosCategoria("jewelery", tuple(p["price"] for p in produtos))
+        self.assertEqual(calcular_metricas(entrada).preco_medio, Decimal("358.65"))
+
+    def test_so_parse_float_deixa_inteiro_como_int_e_e_recusado(self):
+        produtos = json.loads('[{"price": 695}]', parse_float=Decimal)
+        with self.assertRaises(TypeError):
+            PrecosCategoria("jewelery", (produtos[0]["price"],))
+
+
+class SaidaInvalidaTest(unittest.TestCase):
+    def base(self, **troca):
+        campos = {"codigo_categoria": "x", "preco_medio": "10.00", "preco_minimo": "9.00",
+                  "preco_maximo": "11.00", "quantidade_produtos": 2}
+        campos.update(troca)
+        return campos
+
+    def test_saida_valida(self):
+        self.assertEqual(MetricasCategoria.de_xcom(self.base()).preco_medio, Decimal("10.00"))
+
+    def test_rejeita_escala_diferente_de_duas_casas(self):
+        for valor in ("10.005", "10", "1E+1", "10.0"):
+            with self.subTest(valor=valor), self.assertRaises(ValueError):
+                MetricasCategoria.de_xcom(self.base(preco_medio=valor))
+
+    def test_rejeita_quantidade_zero_e_ordem_invalida(self):
+        with self.assertRaises(ValueError):
+            MetricasCategoria.de_xcom(self.base(quantidade_produtos=0))
+        with self.assertRaises(ValueError):
+            MetricasCategoria.de_xcom(self.base(preco_minimo="20.00"))
+        with self.assertRaises(ValueError):
+            MetricasCategoria.de_xcom(self.base(preco_minimo="-1.00"))
+
+    def test_rejeita_float_e_int_na_construcao_direta(self):
+        with self.assertRaises(TypeError):
+            MetricasCategoria("x", 10.0, Decimal("1.00"), Decimal("20.00"), 3)  # type: ignore[arg-type]
+        with self.assertRaises(TypeError):
+            MetricasCategoria("x", Decimal("10.00"), 1, Decimal("20.00"), 3)  # type: ignore[arg-type]
+
+
 class EntradaInvalidaTest(unittest.TestCase):
+    def test_lista_vira_tupla(self):
+        entrada = PrecosCategoria("x", [Decimal("1.00")])  # type: ignore[arg-type]
+        self.assertIsInstance(entrada.precos, tuple)
+
     def test_rejeita_float(self):
         with self.assertRaises(TypeError):
             PrecosCategoria("x", (10.0,))  # type: ignore[arg-type]

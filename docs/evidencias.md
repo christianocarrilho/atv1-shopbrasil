@@ -102,11 +102,15 @@ Validação executada em 22 nov. 2026, com Python 3.14.7 (macOS), sobre a base `
 
 | Verificação | Comando | Resultado observado |
 |---|---|---|
-| Testes do domínio | `python3 -m unittest discover -s pipeline/tests -t pipeline` | `Ran 14 tests ... OK` |
+| Testes do domínio | `python3 -m unittest discover -s pipeline/tests -t pipeline` | `Ran 22 tests ... OK` |
 | Exemplo da issue | `test_exemplo_da_issue` | `10.00`, `10.00`, `10.01` → média `10.00`, mínimo `10.00`, máximo `10.01`, quantidade `3` |
 | Empate | `test_empate_arredonda_para_cima` | média exata `10.005` → `10.01` (`ROUND_HALF_UP`) |
 | Arredondamento único | `test_arredonda_uma_unica_vez` | `0.004`, `0.004`, `0.007` → `0.01`; arredondar cada preço antes daria `0.00` |
 | Sem float | `EntradaInvalidaTest`, `TransporteXcomTest` | `float`, `bool`, `NaN`, infinito, número no lugar de string e texto não decimal recusados; ida e volta por `json.dumps`/`json.loads` preserva os valores |
+| Preços inteiros da FakeStore | `FronteiraJsonTest` | `json.loads` com `parse_float=Decimal` e `parse_int=Decimal`: `695` e `22.3` → média `358.65`; só com `parse_float`, o `int` é recusado |
+| Saída validada | `SaidaInvalidaTest` | escala diferente de duas casas (`10.005`, `10`, `1E+1`, `10.0`), quantidade 0, mínimo acima da média, mínimo negativo, `float` e `int` recusados |
 | Lint de arquitetura | `python3 qualidade/lint_arquitetura.py` | `OK: 5 arquivo(s) Python verificado(s), nenhuma violação de arquitetura.` |
+
+Revisão cruzada do Kiro sobre cf4092d: aprovado com ajustes. Ajustes aplicados: conversão de preços inteiros na fronteira (`parse_int=Decimal`), validação de `MetricasCategoria`, um item por código na saída consolidada, média exata como fração com um único arredondamento e remoção da ressalva sobre valores positivos.
 
 Sem cenário E2E nesta issue: o cálculo ainda não é acionado pelo DAG. A #16 integra o contrato às tasks mapeadas e acrescenta o cenário ao `e2e/pipeline/executar.sh`.
