@@ -28,7 +28,11 @@ json() {
   curl -sS --max-time 10 "$BASE$1" | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin), ensure_ascii=False, separators=(",", ":")))'
 }
 # pagina [query]: resumo da página do painel extraído por fixtures/pagina.py (#19).
-pagina() { curl -sS --max-time 10 "$BASE/$1" | python3 "$ROOT/e2e/web/fixtures/pagina.py"; }
+pagina() { curl -sS --max-time 10 "$BASE/${1:-}" | python3 "$ROOT/e2e/web/fixtures/pagina.py"; }
+# json_ordenado <rota>: JSON canônico com chaves ordenadas, como o filtro tojson do Jinja embute na página.
+json_ordenado() {
+  curl -sS --max-time 10 "$BASE$1" | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin), ensure_ascii=False, separators=(",", ":"), sort_keys=True))'
+}
 codigo_http() { curl -sS -o /dev/null --max-time 10 -w '%{http_code}' "$BASE$1"; }
 reader_sql() { psql_como shopbrasil_reader "$READER_PASSWORD" shopbrasil -c "$1"; }
 contagens() {
@@ -105,12 +109,12 @@ PY
 
 # P. Página do painel (#19): abre na última data, filtro por data, estado vazio, mesmos valores da API.
 verificar "P2 painel abre na data mais recente" \
-  "2026-11-24|2026-11-24||Joias/1234567890.12/0.10/9999999999.99/4|$(json '/api/metricas?data=2026-11-24')" "$(pagina)"
+  "2026-11-24|2026-11-24||Joias/1234567890.12/0.10/9999999999.99/4|$(json_ordenado '/api/metricas?data=2026-11-24')" "$(pagina)"
 verificar "P3 selecionar data carrega o dia" \
-  "2026-11-22|2026-11-22||Eletrônicos/10.00/10.00/10.01/3;Joias/10.01/10.00/10.01/2|$(json '/api/metricas?data=2026-11-22')" \
+  "2026-11-22|2026-11-22||Eletrônicos/10.00/10.00/10.01/3;Joias/10.01/10.00/10.01/2|$(json_ordenado '/api/metricas?data=2026-11-22')" \
   "$(pagina '?data=2026-11-22')"
 verificar "P4 data sem registros" \
-  '2026-11-21|2026-11-21|Sem métricas para esta data||{"data":"2026-11-21","vazia":true,"metricas":[]}' \
+  '2026-11-21|2026-11-21|Sem métricas para esta data||{"data":"2026-11-21","metricas":[],"vazia":true}' \
   "$(pagina '?data=2026-11-21')"
 verificar "P5 data inválida na página" "422" "$(codigo_http '/?data=2026-02-30')"
 
@@ -125,10 +129,10 @@ verificar "B3 Chart.js local" "200|1" \
 
 # E. Linha de evolução (#21): série embutida na página igual a /api/evolucao, lacunas como null.
 evolucao_da_pagina() {
-  curl -sS "$BASE/$1" | python3 -c 'import html,json,re,sys; p=sys.stdin.read(); m=re.search(r"<script type=\"application/json\" id=\"evolucao-dados\">(.*?)</script>", p, re.S); a=re.search(r"id=\"evolucao-aviso\">(.*?)<", p); print(json.dumps(json.loads(m.group(1)), ensure_ascii=False, separators=(",", ":")) + "|" + (html.unescape(a.group(1)) if a else ""))'
+  curl -sS "$BASE/$1" | python3 -c 'import html,json,re,sys; p=sys.stdin.read(); m=re.search(r"<script type=\"application/json\" id=\"evolucao-dados\">(.*?)</script>", p, re.S); a=re.search(r"id=\"evolucao-aviso\">(.*?)<", p); print(json.dumps(json.loads(m.group(1)), ensure_ascii=False, separators=(",", ":"), sort_keys=True) + "|" + (html.unescape(a.group(1)) if a else ""))'
 }
 FILTRO_E1='categoria=electronics&inicio=2026-11-20&fim=2026-11-23'
-verificar "E1 série da página igual à API, com lacunas" "$(json "/api/evolucao?$FILTRO_E1")|" "$(evolucao_da_pagina "?$FILTRO_E1")"
+verificar "E1 série da página igual à API, com lacunas" "$(json_ordenado "/api/evolucao?$FILTRO_E1")|" "$(evolucao_da_pagina "?$FILTRO_E1")"
 verificar "E1 pontos e lacunas" "2026-11-20=20.00 2026-11-21=None 2026-11-22=10.00 2026-11-23=None" \
   "$(json "/api/evolucao?$FILTRO_E1" | python3 -c 'import json,sys; print(" ".join("%s=%s" % (p["data"], p["preco_medio"]) for p in json.load(sys.stdin)["pontos"]))')"
 verificar "E2 padrão: primeira categoria, 30 dias até a data" "electronics|2026-10-25|2026-11-23|30" \
