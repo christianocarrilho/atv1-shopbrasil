@@ -5,7 +5,7 @@ Código de pessoa: 1691353
 Matrícula: 262987
 
 Lê o HTML em stdin e imprime: data do filtro | data exibida | estado vazio | linhas da tabela
-(células separadas por "/" e linhas por ";") | coleção embutida (JSON canônico).
+(células separadas por "/" e linhas por ";") | coleção embutida (JSON canônico com chaves ordenadas, como o tojson do Jinja).
 """
 
 import html
@@ -32,5 +32,5 @@ print("|".join([
     achar(r'<span id="data-selecionada">(.*?)</span>'),
     achar(r'<p class="vazio" id="estado-vazio">(.*?)</p>'),
     ";".join(linhas),
-    json.dumps(dados, ensure_ascii=False, separators=(",", ":")),
+    json.dumps(dados, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
 ]))

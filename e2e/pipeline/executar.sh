@@ -299,7 +299,7 @@ SNAPSHOT_PADRAO="electronics=86.50/64.00/109.00/2;jewelery=695.00/695.00/695.00/
 
 # M1. Fan-out: uma instância mapeada por categoria observada, todas no ecommerce_pool.
 verificar "M1 instâncias mapeadas e pool" "4|0,1,2,3|ecommerce_pool" "$(admin_sql airflow "
-SELECT count(*) || '|' || string_agg(map_index::text, ',' ORDER BY map_index) || '|' || string_agg(DISTINCT pool, ',')
+SELECT count(*) || '|' || string_agg(region_index::text, ',' ORDER BY region_index) || '|' || string_agg(DISTINCT pool, ',')
 FROM task_instance WHERE dag_id = '$DAG_ID' AND run_id = '$RUN_ID' AND task_id = '$CALCULAR' AND try_number = 1")"
 
 # M2. Concorrência: com 3 s por instância, o pool de dois slots limita a duas simultâneas.
@@ -313,9 +313,9 @@ verificar "M2 no máximo duas instâncias simultâneas" "2" "$(concorrencia "$RU
 
 # M3. Fan-in: um resultado por categoria, no contrato da #15, com payloads pequenos no XCom.
 xcom_task() {
-  # xcom_task <run_id> <task_id> <expressão SQL sobre x.value>: última tentativa, map_index -1.
+  # xcom_task <run_id> <task_id> <expressão SQL sobre x.value>: última tentativa, região -1 (task não mapeada; no Airflow 3.4 a coluna é region_index).
   admin_sql airflow "SELECT $3 FROM xcom_v2 x JOIN task_instance ti ON ti.id = x.task_instance_id
-    WHERE ti.dag_id = '$DAG_ID' AND ti.run_id = '$1' AND ti.task_id = '$2' AND ti.map_index = -1 AND x.key = 'return_value'
+    WHERE ti.dag_id = '$DAG_ID' AND ti.run_id = '$1' AND ti.task_id = '$2' AND ti.region_index = -1 AND x.key = 'return_value'
     ORDER BY ti.try_number DESC LIMIT 1"
 }
 verificar "M3 consolidação com um item por categoria" "4|electronics,jewelery,men's clothing,women's clothing|66.13" "$(xcom_task "$RUN_ID" analise.consolidar "

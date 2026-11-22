@@ -303,3 +303,42 @@ Comando: `e2e/web/executar.sh`. Ele constrói a imagem `web/Dockerfile` (`python
 | Testes da web no host (só biblioteca padrão) | `python3 -m unittest discover -s web/tests -t web` | `Ran 33 tests ... OK (skipped=21)`: os 12 de `consultas` rodam; apresentação, composição e infraestrutura exigem FastAPI e psycopg |
 | Testes do pipeline e do lint | `python3 -m unittest discover -s pipeline/tests -t pipeline`; `python3 -m unittest discover -s qualidade/tests` | `Ran 51 tests ... OK`; `Ran 38 tests ... OK` |
 | Lint de arquitetura | `python3 qualidade/lint_arquitetura.py` | `OK: 35 arquivo(s) Python verificado(s), nenhuma violação de arquitetura.` |
+
+## Validação final — suíte E2E completa (#23, #11)
+
+Executada em 22 nov. 2026, com Docker 29.9.2, Docker Compose v5.6.1 e Python 3.14.7 (macOS), sobre `main` d7cf1a1 (merge do PR #49) com as correções dos próprios testes descritas abaixo.
+
+Comando: `e2e/executar_todos.sh`. Código de saída 0. **236 verificações PASS, 0 FAIL.**
+
+| Cenário | Resultado | PASS | FAIL | Duração |
+|---|---|---|---|---|
+| ambiente | PASS | 29 | 0 | 62s |
+| esquema | PASS | 36 | 0 | 10s |
+| pipeline | PASS | 67 | 0 | 206s |
+| publicacao | PASS | 44 | 0 | 39s |
+| web | PASS | 34 | 0 | 14s |
+| integrado | PASS | 26 | 0 | 158s |
+
+Também passaram, sobre a mesma revisão: lint de arquitetura (`OK: 48 arquivo(s) Python verificado(s), nenhuma violação de arquitetura.`), testes unitários do pipeline e os 47 testes da web no contêiner.
+
+### Achados da primeira execução e correções
+
+A primeira execução, sobre d7cf1a1 sem correções, terminou com ambiente, esquema e publicação aprovados e falhas em pipeline (2), web (5) e integrado (16). Todas estavam nos scripts de teste; o código do pipeline e da web não mudou.
+
+| Achado | Issue | Causa | Correção |
+|---|---|---|---|
+| M1 e M3 sem resultado | #16 | No Airflow 3.4 a coluna da task mapeada é `region_index`, não `map_index` | Consultas usam `region_index` |
+| P1 e P2 com página vazia | #19 | `pagina` sem argumento parava por `set -u` | Parâmetro opcional `${1:-}` |
+| P3, P4 e E1 com JSON “diferente” | #19, #21 | O filtro `tojson` do Jinja ordena as chaves; os valores eram iguais | Comparação com JSON canônico de chaves ordenadas |
+| N1 a N6 com runs em `queued` | #23 | O DAG entra pausado e o cenário não o despausava | Despausa, aguarda a run agendada automática e só então dispara as runs do cenário |
+| N2 a N6 sem publicação (reexecução) | #23 | Datas de outubro, antes do `start_date` (01/11): a run termina `success` sem executar tasks | Datas 10 a 13/11; N1 passa a exigir `publicacao.publicar` executada |
+| N4 com JSON “diferente” | #23 | Mesma ordenação do `tojson` | Comparação com chaves ordenadas |
+
+### Conferência visual do painel no navegador
+
+Sobre o ambiente do cenário integrado mantido com `E2E_MANTER=1`, com dados publicados pelo DAG real (10 a 12/11), o painel foi aberto num navegador Chromium:
+
+- Chart.js 4.6.1 carregado de `/estaticos/`, sem erros no console e sem requisições externas.
+- Em 11/11, a tabela mostrou 5 categorias (com `toys`), e as barras mostraram os mesmos preços médios: `86.5, 695, 66.13, 67.76, 9.85`.
+- Ao trocar a data no campo para 09/11, a página recarregou com “Sem métricas para esta data” na tabela e nas barras, mantendo os filtros da evolução.
+- Linha de `jewelery` de 10 a 12/11: `695, 695, null`. Linha de `toys` de 09 a 13/11: `null, null, 67.76, null, null`, com `spanGaps: false`; o único ponto aparece isolado, sem ligação nem zero nos dias sem dados.
