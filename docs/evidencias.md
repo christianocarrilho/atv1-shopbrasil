@@ -117,7 +117,7 @@ Sem cenário E2E nesta issue: o cálculo ainda não é acionado pelo DAG. A #16 
 
 ## #4 — DAG TaskFlow, agenda e data de referência
 
-Validação executada em 22 nov. 2026, com Docker 29.9.2 e Docker Compose v5.6.1, sobre a revisão 9a957f0 (base `main` bba4730, com o esquema da #3). O DAG está descrito no [README do pipeline](../pipeline/README.md#dag-shopbrasil_metricas).
+Validação executada em 22 nov. 2026, com Docker 29.9.2 e Docker Compose v5.6.1, sobre a revisão 9a957f0 (base `main` bba4730, com o esquema da #3) e repetida na revisão final 511e988 (base `main` db55d81), com o mesmo resultado. O DAG está descrito no [README do pipeline](../pipeline/README.md#dag-shopbrasil_metricas).
 
 Comando: `e2e/pipeline/executar.sh`. Ele sobe o Airflow e o PostgreSQL no projeto Compose `shopbrasil-e2e-pipeline-<timestamp>`, com senhas aleatórias e os DAGs reais de `pipeline/dags`, e remove contêineres e volumes ao final. Duração observada: cerca de 1 min. Código de saída 0, 19 verificações PASS.
 
@@ -135,4 +135,6 @@ Comando: `e2e/pipeline/executar.sh`. Ele sobe o Airflow e o PostgreSQL no projet
 
 Observações do Airflow 3.4 usadas pelo cenário: cada tentativa é uma linha de `task_instance`, e o XCom fica em `xcom_v2`, ligado pela `task_instance_id`.
 
-Testes unitários: `python3 -m unittest discover -s pipeline/tests -t pipeline` retornou `Ran 8 tests ... OK`. Lint: `OK: 8 arquivo(s) Python verificado(s), nenhuma violação de arquitetura.`
+Testes unitários na revisão final, já com os da #15: `python3 -m unittest discover -s pipeline/tests -t pipeline` retornou `Ran 30 tests ... OK`. Lint: `OK: 10 arquivo(s) Python verificado(s), nenhuma violação de arquitetura.`
+
+Revisão cruzada do Kiro sobre 9a957f0: aprovado com ajustes, sem bloqueantes; o Kiro também rodou o E2E com 19 PASS. Ajustes aplicados: `trap` registrado antes de criar o arquivo de senhas, logs removidos quando não há falha, `mktemp` com caminho completo no macOS, porta padrão própria do cenário (18090), P5 lendo o XCom da 2ª tentativa, fuso da agenda vindo do domínio e comentários sobre a API interna do P6 e a janela das 06:00. Mantido como está: runs manuais com data lógica arbitrária publicam para essa data; o README orienta a reprocessar limpando as tasks da run original. Na execução final, nenhum temporário `shopbrasil-e2e-*` ficou em `$TMPDIR`.
