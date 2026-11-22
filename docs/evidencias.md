@@ -138,3 +138,30 @@ Observações do Airflow 3.4 usadas pelo cenário: cada tentativa é uma linha d
 Testes unitários na revisão final, já com os da #15: `python3 -m unittest discover -s pipeline/tests -t pipeline` retornou `Ran 30 tests ... OK`. Lint: `OK: 10 arquivo(s) Python verificado(s), nenhuma violação de arquitetura.`
 
 Revisão cruzada do Kiro sobre 9a957f0: aprovado com ajustes, sem bloqueantes; o Kiro também rodou o E2E com 19 PASS. Ajustes aplicados: `trap` registrado antes de criar o arquivo de senhas, logs removidos quando não há falha, `mktemp` com caminho completo no macOS, porta padrão própria do cenário (18090), P5 lendo o XCom da 2ª tentativa, fuso da agenda vindo do domínio e comentários sobre a API interna do P6 e a janela das 06:00. Mantido como está: runs manuais com data lógica arbitrária publicam para essa data; o README orienta a reprocessar limpando as tasks da run original. Na execução final, nenhum temporário `shopbrasil-e2e-*` ficou em `$TMPDIR`.
+
+## #17 — Publicação transacional do snapshot diário
+
+Validação executada em 22 nov. 2026, com Docker 29.9.2, Docker Compose v5.6.1 e Python 3.14.7 (macOS), sobre a revisão 01ef1aa (base `main` 78ed846). O desenho está no [README da infraestrutura](../pipeline/shopbrasil_pipeline/infraestrutura/README.md#publicação-17).
+
+Comando: `e2e/publicacao/executar.sh`. Ele sobe Airflow 3.4.0 e PostgreSQL 18.7 no projeto Compose `shopbrasil-e2e-publicacao-<timestamp>` (porta padrão 18100), com o esquema da #3 aplicado pelo `db-init`, e roda o driver [fixtures/publicar.py](../e2e/publicacao/fixtures/publicar.py) dentro do contêiner `airflow-scheduler`. O driver usa `composicao.publicar_snapshot()` com a Connection `shopbrasil_postgres` real; as leituras usam a conta de leitura. Duração observada: cerca de 36 s. Código de saída 0, 26 verificações PASS.
+
+| Cenário | Resultado | Observado |
+|---|---|---|
+| U0 subida | PASS | `up --wait` dos serviços do Airflow e dependências |
+| U1 Connection | PASS | `current_user` pelo `PostgresHook` = `shopbrasil_writer`; banco analítico vazio (0 categorias, 0 métricas) |
+| U2 publicação de 2026-11-20 | PASS | `categorias_cadastradas` = `electronics`, `men's clothing`; cadastro com `descricao` igual ao código; snapshot `electronics=20.00/15.00/25.00/2`, `men's clothing=30.00/30.00/30.00/1` |
+| U3 publicação inicial de 2026-11-21 | PASS | só `jewelery` cadastrada (`electronics` já existia); snapshot `electronics=10.00/10.00/10.01/3`, `jewelery=10.01/10.00/10.01/2` |
+| U4 valores lidos | PASS | conta de leitura: `electronics|10.00|10.00|10.01`, `jewelery|10.01|10.00|10.01`, iguais aos publicados |
+| U5 republicação de 2026-11-21 (mesma run) | PASS | snapshot substituído por `electronics=12.00/11.00/13.00/4`, `women's clothing=50.50/40.00/61.00/3`; `jewelery` fora do dia e mantida no cadastro; só `women's clothing` cadastrada; no máximo 1 linha por data+categoria |
+| U6 republicação idêntica | PASS | 2 linhas no dia, máximo 1 por chave |
+| U7 outra data intacta | PASS | 2026-11-20 com os mesmos valores e o mesmo `id@xmin` (`1@1236 2@1236`) após as publicações de 2026-11-21 |
+| U8 falha injetada no ponto de extensão | PASS | etapa adicional viu 2 linhas novas na transação e lançou `FalhaInjetada`; snapshot anterior preservado (mesmos valores e `id@xmin` `7@1256 8@1256`); `toys` não cadastrada |
+| U9 falha do banco no meio | PASS | 2º item com `10000000000.00` gerou `NumericValueOutOfRange` (`numeric field overflow`) depois do 1º inserido; snapshot anterior e cadastro preservados |
+| U10 recusas antes da transação | PASS | código repetido → `CategoriaRepetidaError`; coleção vazia → `ColecaoVaziaError`; snapshot, cadastro e 2026-11-20 inalterados |
+
+O cenário chama o caso de uso diretamente porque o DAG só passa a acionar a publicação na #16. O `e2e/pipeline/executar.sh` foi repetido na mesma revisão porque o pacote montado no Airflow mudou: código de saída 0, 19 verificações PASS, sem alteração no DAG.
+
+| Verificação | Comando | Resultado observado |
+|---|---|---|
+| Testes unitários | `python3 -m unittest discover -s pipeline/tests -t pipeline` | `Ran 39 tests ... OK` (9 novos do caso de uso com repositório falso) |
+| Lint de arquitetura | `python3 qualidade/lint_arquitetura.py` | `OK: 15 arquivo(s) Python verificado(s), nenhuma violação de arquitetura.` |
