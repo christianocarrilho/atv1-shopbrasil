@@ -161,12 +161,13 @@ xcom_catalogo() {
 }
 
 # I1. Configuração de produção, lida sem a variável de atraso reduzido do override E2E.
-config_busca="$(dc exec -T -e PYTHONPATH=/opt/airflow/pipeline:/opt/airflow/dags airflow-scheduler env -u SHOPBRASIL_BUSCA_RETRY_DELAY_SEGUNDOS python -c '
+config_busca="$(dc exec -T -e PYTHONPATH=/opt/airflow/pipeline:/opt/airflow/dags airflow-scheduler env -u SHOPBRASIL_BUSCA_RETRY_DELAY_SEGUNDOS -u SHOPBRASIL_CALCULO_ATRASO_SEGUNDOS python -c '
 from airflow.dag_processing.dagbag import DagBag
 from shopbrasil_pipeline.composicao import fonte_catalogo
 t = DagBag("/opt/airflow/dags").dags["shopbrasil_metricas"].get_task("ingestao.buscar_produtos")
-print(f"RESULTADO={t.retries}|{t.retry_delay.total_seconds()}|{t.retry_exponential_backoff}|{fonte_catalogo().timeout}")' 2>/dev/null | sed -n 's/^RESULTADO=//p' | tail -1)"
-verificar "I1 retries, atraso inicial, backoff e timeout de produção" "3|60.0|2.0|15" "$config_busca"
+import shopbrasil_metricas as m
+print(f"RESULTADO={t.retries}|{t.retry_delay.total_seconds()}|{t.retry_exponential_backoff}|{fonte_catalogo().timeout}|avisos={len(m.avisar_ajustes_de_teste())}")' 2>/dev/null | sed -n 's/^RESULTADO=//p' | tail -1)"
+verificar "I1 retries, atraso inicial, backoff, timeout de produção e nenhum ajuste de teste" "3|60.0|2.0|15|avisos=0" "$config_busca"
 
 # I2. Coleta normal (run P4): uma tentativa, projeção com preços como strings decimais e XCom pequeno.
 verificar "I2 coleta normal em uma tentativa" "1:success" "$(tentativas "$RUN_ID" "$BUSCAR" | awk '{print $1}')"
@@ -230,6 +231,9 @@ verificar "C1 callback de sucesso" "1" "$(contar_log "$RUN_ID" "$BUSCAR" 1 "[SHO
 # C6. Depois do reprocessamento (P5), o callback conta a tentativa do ciclo atual: a 2ª execução
 # registrada (attempt=2.log) é a 1ª tentativa do novo ciclo, com 3 retentativas disponíveis.
 verificar "C6 tentativa do ciclo atual após reprocessar" "1" "$(contar_log "$RUN_ID" "$BUSCAR" 2 "[SHOPBRASIL][SUCESSO] dag=$DAG_ID run=$RUN_ID task=$BUSCAR tentativa=1/4")"
+# C7. Os ajustes de teste do override E2E ficam explícitos no log da coleta, nunca silenciosos.
+verificar "C7 aviso dos ajustes de teste ativos" "1|1" \
+  "$(contar_log "$RUN_ID" "$BUSCAR" 1 "[SHOPBRASIL][AVISO] ajuste de teste ativo: SHOPBRASIL_BUSCA_RETRY_DELAY_SEGUNDOS=2 (produção: 60)")|$(contar_log "$RUN_ID" "$BUSCAR" 1 "[SHOPBRASIL][AVISO] ajuste de teste ativo: SHOPBRASIL_CALCULO_ATRASO_SEGUNDOS=3 (produção: 0)")"
 
 # C2. Retry na falha transitória (I3): aviso na 1ª tentativa e sucesso na 2ª.
 verificar "C2 callback de retry" "1|1" "$(contar_log "$RUN_RETRY" "$BUSCAR" 1 "[SHOPBRASIL][RETRY] dag=$DAG_ID run=$RUN_RETRY task=$BUSCAR tentativa=1/4 erro=HTTPError")|$(contar_log "$RUN_RETRY" "$BUSCAR" 2 "[SHOPBRASIL][SUCESSO]")"
