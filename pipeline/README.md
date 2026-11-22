@@ -29,9 +29,14 @@ Interface entregue à #6 (XCom de `buscar_produtos`), uma projeção pequena que
 
 `categoria` só é preenchida quando o valor é texto, e `preco` só quando é número, como string decimal sem arredondamento. Nos demais casos o campo fica `null`, e `tipo_categoria` ou `tipo_preco` informa o tipo JSON recebido (`boolean`, `string`, `null`, `array`, `object` ou `ausente`). `tipo_raiz` diferente de `array` indica uma resposta que não é lista. Com isso, a #6 rejeita catálogo vazio, categoria em branco, booleano e texto no lugar do preço. `NaN` e `Infinity` chegam com `tipo_preco` `number` e `preco` `"NaN"` ou `"Infinity"`, então a #6 também confere se o preço é finito, e o preço chega à #15 sem passar por float.
 
+## Publicação
+
+O caso de uso `PublicarSnapshot` ([aplicacao/publicacao.py](shopbrasil_pipeline/aplicacao/publicacao.py)) recebe a `Execucao` e a coleção consolidada de `MetricasCategoria`, um item por código, e publica o snapshot da data de referência numa transação do adaptador PostgreSQL ([infraestrutura/publicacao_postgres.py](shopbrasil_pipeline/infraestrutura/publicacao_postgres.py)). A [composição](shopbrasil_pipeline/composicao.py) entrega o caso de uso montado com a Connection `shopbrasil_postgres`: `composicao.publicar_snapshot().executar(execucao, metricas)`. A ligação com a task `publicacao.publicar` do DAG é da #16, e o histórico por run da #18 entra como etapa adicional da mesma transação.
+
 ## Testes
 
 ```bash
 python3 -m unittest discover -s pipeline/tests -t pipeline   # unitários, só biblioteca padrão
-e2e/pipeline/executar.sh                                     # E2E com Airflow e PostgreSQL em Docker
+e2e/pipeline/executar.sh                                     # E2E do DAG com Airflow e PostgreSQL em Docker
+e2e/publicacao/executar.sh                                   # E2E da publicação com a Connection real
 ```
