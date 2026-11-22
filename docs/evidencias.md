@@ -43,3 +43,30 @@ python3 -m unittest discover -s qualidade/tests
 Os testes montam repositórios temporários com a configuração versionada. Cobrem um código conforme que passa e exemplos proibidos que falham: imports absolutos, relativos e dinâmicos entre `pipeline/` e `web/` (ARQ001), inversões de camada no Pipeline e na Web/API (ARQ002), pacote externo no domínio, na aplicação e em consultas (ARQ003), drivers, HTTP e hooks vetados no DAG e na apresentação (ARQ004), relativo que sai do pacote (ARQ005), arquivo sem camada (ARQ006), sintaxe inválida (ARQ007), saída 1 com `arquivo:linha:coluna` e saída 2 para configuração que tente liberar imports entre módulos.
 
 Cada PR de código registra o resultado do lint pelo [template de PR](../.github/pull_request_template.md) e pelo workflow `Arquitetura`.
+
+## #2 — Ambiente Docker, Connection e pool
+
+Validação executada em 22 nov. 2026, com Docker 29.9.2 e Docker Compose v5.6.1, sobre a base `main` f942b4e com o patch da #2. O ambiente está descrito em [ambiente-docker.md](ambiente-docker.md). O `db/schema.sql` da #3 ainda não existia. O cenário usou a fixture isolada `e2e/ambiente/fixtures/sql/01-sonda.sql` e o DAG de sonda `e2e_ambiente_sonda`.
+
+Comando: `e2e/ambiente/executar.sh`. Ele sobe o projeto Compose `shopbrasil-e2e-ambiente-<timestamp>` com senhas aleatórias e remove contêineres e volumes ao final. Duração observada: cerca de 1 min. Código de saída 0.
+
+| Cenário | Resultado | Observado |
+|---|---|---|
+| A1 configuração | PASS | `docker compose config -q` |
+| A2 subida limpa | PASS | `up --wait` concluído; api-server, scheduler, dag-processor e postgres `healthy`; `db-init` e `airflow-init` com código 0 |
+| A3 versões | PASS | Airflow 3.4.0, PostgreSQL 18.7, provider postgres 7.1.1 |
+| A4 `ecommerce_pool` | PASS | 2 slots |
+| A5 Connection `shopbrasil_postgres` | PASS | `PostgresHook` conectou como `shopbrasil_writer` ao banco `shopbrasil`, porta 5432 |
+| A6 esquema | PASS | aviso `/db/schema.sql não encontrado` (DDL da #3); fixture `e2e_ambiente_sonda` aplicada |
+| A7 privilégios por tabela | PASS | 0 violações em 1 tabela de `public`; leitor e escritor sem `CREATE` no esquema e sem `CONNECT` no banco `airflow` |
+| A8 leitura da web | PASS | `SELECT` aceito; `INSERT`, `UPDATE` e `DELETE` com `permission denied for table`; `CREATE TABLE` com `permission denied for schema public`; banco `airflow` com `permission denied for database`; senha incorreta rejeitada |
+| A9 escrita sem DDL | PASS | `CREATE TABLE` do escritor com `permission denied for schema public` |
+| A10 Airflow sem a Web/API | PASS | serviços sem Web/API; 0 erros de importação; DAG run `success`; 4 tasks mapeadas `success` no `ecommerce_pool`; 4 linhas gravadas pelo escritor; concorrência máxima observada 2 |
+| A11 reaplicação do `db-init` | PASS | código 0 sobre volume existente; dados preservados e leitura mantida |
+| A12 `db-init` com SQL inválido | PASS | código 3, `syntax error` |
+
+Verificação complementar do Compose sem o override E2E, com um `.env` derivado do `.env.example`: subida com os seis serviços nos estados esperados, `POST /auth/token` com o usuário da interface retornou 201, `airflow pools list` mostrou `ecommerce_pool` com 2 slots e o `db-init` registrou o aviso do esquema ausente. Com as senhas vazias do template, `docker compose config` falhou com `defina <VARIÁVEL> no .env`.
+
+Lint de arquitetura sobre o mesmo patch, com Python 3.14.7: `python3 qualidade/lint_arquitetura.py --listar` retornou `OK: 0 arquivo(s) Python verificado(s), nenhuma violação de arquitetura.` e saída 0; `python3 -m unittest discover -s qualidade/tests` retornou `Ran 38 tests ... OK`. O DAG de sonda fica em `e2e/`, fora do escopo do lint, porque usa `PostgresHook` diretamente para testar a Connection.
+
+Na revisão final, `e2e/ambiente/executar.sh` passou as 29 verificações. O A7 conferiu os quatro privilégios do escritor separadamente; A2 e A10 subiram apenas os serviços do Airflow e suas dependências.
