@@ -66,3 +66,9 @@ Consulte a [especificação da ShopBrasil](docs/especificacao.md) para o modelo 
 - Na Web/API, `apresentacao` usa os casos de uso e modelos de `consultas`, sem acessar `infraestrutura` diretamente. `consultas` define seus modelos de leitura e contratos sem depender de HTTP ou PostgreSQL. `infraestrutura` implementa esses contratos. A composição é o ponto que conecta apresentação, consultas e adaptadores.
 - Proíba imports entre `pipeline/` e `web/` nos dois sentidos. O esquema em `db/` é o contrato entre eles. O lint da #26 deve verificar imports absolutos e relativos e falhar com diagnóstico acionável em caso de violação; cubra o resultado com exemplos permitidos e proibidos.
 - Execute o comando versionado do lint de arquitetura em cada PR que altere código ou regras de dependência e registre o resultado no PR. PR de código sujeito às regras só entra em `main` depois que a checagem estiver disponível e passar. Não silencie violações nem amplie permissões para passar no lint. A revisão também verifica responsabilidades que imports não revelam, como SQL no DAG ou no controller.
+
+## E2E por entrega
+
+- Para cada issue funcional ou técnica com comportamento observável de ponta a ponta, acrescente ao mesmo PR um cenário E2E para o comportamento novo ou alterado. Se um cenário existente já cobre o caso, atualize-o quando necessário e identifique-o no PR. Se não houver cenário aplicável, explique por quê no PR.
+- Antes do merge na `main`, execute o cenário novo ou atualizado e os cenários E2E afetados sobre a revisão final do PR. Registre no PR o comando, os cenários executados e o resultado observado. Falha ou ausência de execução aplicável bloqueia o merge.
+- A #23 consolida a execução e a documentação da suíte. Inclua cobertura incremental em cada entrega aplicável; se faltar infraestrutura para executar o cenário, implemente o mínimo necessário ou integre primeiro a dependência que o viabiliza.
