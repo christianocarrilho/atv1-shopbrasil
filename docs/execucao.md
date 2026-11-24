@@ -37,14 +37,21 @@ docker compose exec airflow-scheduler airflow dags unpause shopbrasil_metricas
 docker compose exec airflow-scheduler airflow dags details shopbrasil_metricas
 ```
 
-Ao despausar, o Airflow cria só a run da ocorrência mais recente. Na interface, o botão **Acionar** dispara uma run manual com a data lógica preenchida com o horário atual. Pela linha de comando, informe a data lógica. 06:00 em Brasília corresponde a 09:00 UTC:
+Ao despausar, o Airflow cria só a run da ocorrência mais recente. Na interface, o botão **Acionar** dispara uma run manual com a data lógica preenchida com o horário atual. Pela linha de comando, informe um instante com `--logical-date`. Às 06:00 em Brasília são 09:00 UTC. Use uma data de referência a partir de 01/11/2026, o `start_date` do DAG. Antes desse limite, o Airflow pode marcar a run como `success` sem executar tarefas. O catálogo é consultado no momento da coleta, inclusive para datas de referência passadas.
 
 ```sh
 docker compose exec airflow-scheduler airflow dags trigger shopbrasil_metricas \
   --logical-date 2026-11-21T09:00:00+00:00 --run-id manual__2026-11-21
 ```
 
-Na interface (Grid), confira a sequência preparação → ingestão (Buscar Produtos → `ValidarProdutosOperator`) → análise (agrupamento, `calcular_metricas` mapeada por categoria no `ecommerce_pool`, consolidação) → publicação, e os registros `[SHOPBRASIL][...]` dos callbacks nos logs das tasks.
+Na interface (Grid), confirme que `publicacao.publicar` executou e ficou em `success`. Confira as linhas da data no banco com a consulta da seção 4. Confira a sequência preparação → ingestão (Buscar Produtos → `ValidarProdutosOperator`) → análise (agrupamento, `calcular_metricas` mapeada por categoria no `ecommerce_pool`, consolidação) → publicação, e os registros `[SHOPBRASIL][...]` dos callbacks nos logs das tasks.
+
+O Airflow exige um instante lógico diferente para cada run deste DAG. Se o exemplo da seção 3 já rodou às 09:00 UTC, uma run com outro `run_id` e o mesmo instante será rejeitada. Para uma nova execução do mesmo dia, use outro horário que ainda pertença a esse dia em Brasília:
+
+```sh
+docker compose exec airflow-scheduler airflow dags trigger shopbrasil_metricas \
+  --logical-date 2026-11-21T10:00:00+00:00 --run-id manual__2026-11-21_segunda
+```
 
 ## 4. Verificar o painel e o banco
 
@@ -57,8 +64,8 @@ docker compose exec -e PGPASSWORD="$SHOPBRASIL_DB_READER_PASSWORD" postgres psql
   SELECT m.data_referencia, c.codigo, m.preco_medio, m.preco_minimo, m.preco_maximo, m.quantidade_produtos
     FROM metricas_categoria m JOIN categoria c ON c.id = m.categoria_id ORDER BY 1, 2;"
 docker compose exec -e PGPASSWORD="$SHOPBRASIL_DB_READER_PASSWORD" postgres psql -h postgres -U shopbrasil_reader -d shopbrasil -c "
-  SELECT h.run_id, h.data_execucao, c.codigo, h.preco_medio, h.quantidade_produtos
-    FROM metricas_categoria_historico h JOIN categoria c ON c.id = h.categoria_id ORDER BY 1, 3;"
+  SELECT h.run_id, h.data_execucao, h.publicado_em, c.codigo, h.preco_medio, h.quantidade_produtos
+    FROM metricas_categoria_historico h JOIN categoria c ON c.id = h.categoria_id ORDER BY 1, 4;"
 ```
 
 ## 5. Executar de novo o mesmo dia
@@ -66,18 +73,18 @@ docker compose exec -e PGPASSWORD="$SHOPBRASIL_DB_READER_PASSWORD" postgres psql
 O comportamento depende da tabela, porque cada uma tem uma regra de unicidade:
 
 - **`metricas_categoria` (snapshot)** guarda uma linha por dia e categoria. Cada publicação bem-sucedida apaga e regrava as linhas daquela data numa única transação. O painel lê essa tabela. Ela atende ao requisito de idempotência: executar de novo nunca duplica linhas, e o dia fica com os valores da coleta mais recente.
-- **`metricas_categoria_historico` (histórico)** guarda uma linha por run e categoria. É a tabela do opcional "modo append": uma run nova acrescenta linhas, porque é outra execução a acompanhar. Repetir a mesma run não acrescenta nada.
+- **`metricas_categoria_historico` (histórico)** guarda uma linha por run e categoria. É a tabela do opcional "modo append": uma run nova acrescenta linhas, porque é outra execução a acompanhar. Repetir a mesma run preserva as linhas existentes e só acrescenta linhas para categorias inéditas naquela run. `data_execucao` é o dia de referência; `publicado_em` é o instante real da primeira inserção e fica vazio para linhas legadas cujo instante é desconhecido.
 
 O dia de referência vem sempre da data lógica da run, convertida para Brasília, e nunca do relógio.
 
 | Como o dia é executado de novo | Snapshot do dia | Histórico |
 |---|---|---|
 | Retry automático de Buscar Produtos | Publicado uma única vez, depois da tentativa bem-sucedida | Uma linha por categoria |
-| **Clear** da run (interface ou `airflow tasks clear`): mesmo `run_id` | Regravado com a nova coleta, sempre uma linha por categoria | As linhas da run ficam como estavam: nada é acrescentado nem alterado |
+| **Clear** da run (interface ou `airflow tasks clear`): mesmo `run_id` | Regravado com a nova coleta quando o Clear inclui a ingestão, sempre uma linha por categoria | As linhas existentes ficam como estavam. Categorias inéditas nessa run ganham uma linha |
 | **Acionar** na interface ou `airflow dags trigger --logical-date ...` para o mesmo dia: `run_id` novo | Regravado com a nova coleta, sempre uma linha por categoria | Mais uma linha por categoria, com o `run_id` novo |
 | `airflow dags trigger` **sem** `--logical-date` | Não muda | Não muda: a run falha em `preparacao.identificar` com `OcorrenciaAusenteError`, porque não há dia de referência |
 
-No **Clear**, o histórico conserva o que a run publicou da primeira vez. Se a nova coleta trouxer valores diferentes, o snapshot fica com os novos, e o log de `publicacao.publicar` registra `[SHOPBRASIL][AVISO] histórico preservado diverge do snapshot` para cada categoria afetada. Para ter os valores novos também no histórico, dispare uma run nova.
+No **Clear**, o histórico conserva os valores e o instante de publicação registrados pela primeira vez para cada categoria. Se a nova coleta trouxer valores diferentes, o snapshot fica com os novos, e o log de `publicacao.publicar` registra `[SHOPBRASIL][AVISO] histórico preservado diverge do snapshot` para cada categoria afetada. Para ter os valores novos também no histórico, dispare uma run nova.
 
 Para repetir a run do passo 3 pela linha de comando:
 

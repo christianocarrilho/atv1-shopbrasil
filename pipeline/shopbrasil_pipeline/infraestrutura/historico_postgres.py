@@ -6,7 +6,8 @@ Matrícula: 262987
 
 Implementa ``EtapaTransacional`` do adaptador da #17: com o cursor da transação aberta, insere em
 ``metricas_categoria_historico`` as quatro métricas de cada categoria publicada, com o ``run_id``
-da execução e ``data_execucao`` igual à data de referência. ``ON CONFLICT (run_id, categoria_id)
+da execução e ``data_execucao`` igual à data de referência. O PostgreSQL preenche ``publicado_em``
+na primeira inserção. ``ON CONFLICT (run_id, categoria_id)
 DO NOTHING`` faz o append: uma run distinta acrescenta linhas e o reprocessamento da mesma run
 mantém as já registradas, sem atualizá-las, como manda a especificação. Antes do INSERT, a etapa lê as
 linhas que a run já tem: a contagem vai para a linha ``[SHOPBRASIL][HISTORICO]`` (gravadas e

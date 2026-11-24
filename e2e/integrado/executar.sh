@@ -74,16 +74,21 @@ SEM_JOIAS="electronics=64.00/64.00/64.00/1;men's clothing=109.95/109.95/109.95/1
 
 echo "Projeto Compose isolado: $PROJECT (Airflow em 127.0.0.1:$AIRFLOW_API_PORT_E2E, web em $BASE)"
 subir_airflow "N0 subida do Airflow"
+if [[ "$(admin_sql airflow "SELECT EXISTS (SELECT 1 FROM dag WHERE dag_id = '$DAG_ID')")" == t ]]; then
+  registrar PASS "N0 DAG registrado ao concluir up --wait" "$DAG_ID"
+else
+  registrar FAIL "N0 DAG registrado ao concluir up --wait" "DAG ausente"; resumo
+fi
 if dc up -d --build --wait --wait-timeout 300 web >"$LOG_DIR/up-web.log" 2>&1; then
   registrar PASS "N0 subida da web" "up --build --wait concluído"
 else
   registrar FAIL "N0 subida da web" "ver $LOG_DIR/up-web.log"; resumo
 fi
-if aguardar_dag "$DAG_ID"; then registrar PASS "N0 DAG registrado" "$DAG_ID"; else registrar FAIL "N0 DAG registrado" "ausente"; resumo; fi
 verificar "N0 painel antes da primeira publicação" "null" "$(json /api/metricas/ultima-data | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["data"]))')"
 # DAG entra pausado; ao despausar, o Airflow (catchup=False) cria a run da ocorrência mais recente.
 # Ela usa o catálogo padrão e termina antes das runs do cenário, para não concorrer com elas.
 airflow_cli dags unpause "$DAG_ID" >/dev/null 2>&1
+verificar "N0 DAG ativo após um unpause" "f" "$(admin_sql airflow "SELECT is_paused FROM dag WHERE dag_id = '$DAG_ID'")"
 AGENDADA=""
 for _ in $(seq 1 40); do
   AGENDADA="$(admin_sql airflow "SELECT run_id FROM dag_run WHERE dag_id = '$DAG_ID' AND run_type = 'scheduled' LIMIT 1")"
@@ -164,5 +169,33 @@ verificar "N6 dados (valores e xmin) e painel preservados" "$ESTADO_ANTES_N6|$DA
 verificar "N7 painel no Chromium com dados do DAG" \
   "4.6.1|86.50,695.00,66.13,67.76,9.85|86.5,695,66.13,67.76,9.85@5|data=2026-11-09;Sem métricas para esta data;Sem métricas para esta data;False|None,None,67.76,None,None@5|spanGaps=False|erros=0" \
   "$(navegador_painel 2026-11-11 2026-11-09 toys 2026-11-09 2026-11-13)"
+
+
+# N8. Disparo manual no mesmo dia e antes do start_date, conforme o guia (#56).
+INSTANTE_REPETIDO="2026-11-11T09:00:00+00:00"
+RUN_REPETIDA="e2e__instante_repetido"
+verificar "N8 instante lógico ocupado pela run original" "$RUN_21" \
+  "$(admin_sql airflow "SELECT run_id FROM dag_run WHERE dag_id = '$DAG_ID' AND logical_date = '$INSTANTE_REPETIDO'")"
+if airflow_cli dags trigger "$DAG_ID" --logical-date "$INSTANTE_REPETIDO" --run-id "$RUN_REPETIDA" >"$LOG_DIR/instante-repetido.log" 2>&1; then
+  registrar FAIL "N8 instante lógico repetido" "disparo aceito"; resumo
+fi
+if grep -qF 'duplicate key value' "$LOG_DIR/instante-repetido.log" &&
+    grep -qF 'Key (dag_id, logical_date)=' "$LOG_DIR/instante-repetido.log"; then
+  registrar PASS "N8 motivo da rejeição" "instante lógico já ocupado"
+else
+  registrar FAIL "N8 motivo da rejeição" "ver $LOG_DIR/instante-repetido.log"
+fi
+verificar "N8 instante lógico repetido não cria run" "0" \
+  "$(admin_sql airflow "SELECT count(*) FROM dag_run WHERE dag_id = '$DAG_ID' AND run_id = '$RUN_REPETIDA'")"
+RUN_NOVA="e2e__outro_horario"
+publicar_dia "N8" sem_joias "2026-11-11T10:00:00+00:00" "$RUN_NOVA"
+verificar "N8 snapshot substituído e histórico separado por run" "$SEM_JOIAS|$COM_NOVA|$SEM_JOIAS" \
+  "$(snapshot_do_dia 2026-11-11)|$(historico_da_run "$RUN_21")|$(historico_da_run "$RUN_NOVA")"
+
+RUN_ANTIGA="e2e__antes_start_date"
+airflow_cli dags trigger "$DAG_ID" --logical-date "2026-10-31T09:00:00+00:00" --run-id "$RUN_ANTIGA" >"$LOG_DIR/antes-start-date.log" 2>&1
+verificar "N8 run anterior ao start_date" "success" "$(aguardar_run "$DAG_ID" "$RUN_ANTIGA")"
+verificar "N8 run anterior sem tasks nem snapshot" "0|0" \
+  "$(admin_sql airflow "SELECT count(*) FROM task_instance WHERE dag_id = '$DAG_ID' AND run_id = '$RUN_ANTIGA'")|$(leitor_sql "SELECT count(*) FROM metricas_categoria WHERE data_referencia = '2026-10-31'")"
 
 resumo

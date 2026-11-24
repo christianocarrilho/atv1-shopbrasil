@@ -460,3 +460,25 @@ Conferência manual com FakeStore real, num ambiente limpo:
 
 Verificações: 85 testes unitários do pipeline OK (4 do operador pulados fora da imagem do Airflow), lint `OK: 49 arquivo(s)`. E2E `e2e/executar_todos.sh pipeline publicacao integrado`: pipeline **72 PASS**, publicacao **45 PASS**, integrado **29 PASS**, 0 FAIL. O integrado falhou duas vezes antes de passar, no build da web, com `additional privileges requested: pass "--allow=fs.read=..."`. A causa era o diretório local do autor, com acento gravado em forma decomposta (NFD), que o Compose 5.6.1 recusa como contexto de build. Executado pelo mesmo diretório em forma composta (NFC), passou. Os nomes versionados do repositório não têm mais acentos nem espaços: o enunciado passou a ser `docs/atividade-01-descricao.pdf`.
 
+
+## Validação das correções de entrega — #55, #56 e #57
+
+Em 24 nov. 2026, as seis partes da suíte foram executadas em projetos Docker descartáveis, com Airflow 3.4.0, PostgreSQL 18.7 e FakeStore controlada. A revisão combinada `4be24ae` serviu aos cenários ambiente, esquema, pipeline, publicação e web. O integrado foi reexecutado sobre `c2cbb13`, cuja única diferença foi a asserção do motivo da rejeição do instante lógico no próprio cenário integrado.
+
+| Comando | Resultado observado |
+|---|---|
+| `e2e/executar_todos.sh ambiente esquema publicacao web` | Ambiente 31, esquema 38, publicação 48 e web 35 verificações aprovadas |
+| `e2e/executar_todos.sh pipeline` | 77 verificações aprovadas |
+| `e2e/executar_todos.sh integrado` | 38 verificações aprovadas |
+| Total | 267 verificações aprovadas, 0 falhas |
+
+| Cenário | Resultado observado |
+|---|---|
+| A10 e N0 — prontidão | DAG registrado quando `up --wait` retornou, DAG ativo após um `unpause` e publicação bem-sucedida |
+| Conferência com a FakeStore real | Três subidas com volumes novos na primeira revisão da #55. Em cada uma, um `up --wait` e um `unpause` foram suficientes para publicar quatro linhas. A revisão posterior ampliou o timeout do health check e passou em A10 e N0 |
+| N5 e N8 — reprocessamento e disparo manual | `Clear` executou a publicação na tentativa 2. O mesmo instante foi rejeitado por colisão de `dag_id` e `logical_date` e não criou run. Novo horário do mesmo dia mudou o snapshot e preservou o histórico anterior. Uma data anterior ao `start_date` terminou em `success` com zero tasks e zero linhas |
+| E7 — atualização de volume | As três linhas anteriores ficaram intactas com `publicado_em` desconhecido. Uma nova inserção recebeu o instante real |
+| H1–H3 — publicação | A referência retroativa foi preservada, o banco registrou o instante real e o reprocessamento conservou o instante original. A falha no histórico reverteu a transação |
+| M7 — `Clear` com catálogo alterado | Mesma run e segunda publicação bem-sucedida. O snapshot mudou. Valores e instantes das linhas históricas originais foram preservados. `jewelery` e `toys` receberam novas linhas com instante real, e o log registrou a divergência das métricas |
+
+O lint de arquitetura aprovou 49 arquivos. Passaram 81 testes do pipeline no host, 4 do operador na imagem do Airflow, 39 do lint e 48 da Web/API. A revisão cruzada com Claude Opus e Kiro levou ao ajuste do timeout de prontidão, à comprovação da troca de snapshot com catálogo diferente e à cobertura de `Clear` no DAG real. A revisão final também pediu a confirmação do motivo da rejeição do instante lógico, aprovada no N8.

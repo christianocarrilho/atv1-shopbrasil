@@ -168,10 +168,11 @@ metricas_categoria_historico.data_execucao:date:not null
 metricas_categoria_historico.preco_medio:numeric(12,2):not null
 metricas_categoria_historico.preco_minimo:numeric(12,2):not null
 metricas_categoria_historico.preco_maximo:numeric(12,2):not null
-metricas_categoria_historico.quantidade_produtos:integer:not null"
+metricas_categoria_historico.quantidade_produtos:integer:not null
+metricas_categoria_historico.publicado_em:timestamp with time zone:null"
 colunas_antes="$(admin_sql "$COLUNAS_SQL")"
 verificar "E2 colunas e tipos" "$COLUNAS_ESPERADAS" "$colunas_antes" \
-  "$(wc -l <<<"$colunas_antes" | tr -d ' ') colunas; ids identity ALWAYS; preços numeric(12,2); quantidade integer; datas date; todas NOT NULL"
+  "$(wc -l <<<"$colunas_antes" | tr -d ' ') colunas; ids identity ALWAYS; preços numeric(12,2); quantidade integer; datas de referência date; publicado_em timestamptz anulável"
 
 # E3. Chaves primárias, unicidade e FKs declaradas.
 RESTRICOES_ESPERADAS="categoria categoria_codigo_uk UNIQUE (codigo)
@@ -295,6 +296,22 @@ if [[ "$novo_id" =~ ^[0-9]+$ ]] && (( novo_id > max_id_antes )); then
   registrar PASS "E7 identity continua após reaplicar" "novo id $novo_id > $max_id_antes"
 else
   registrar FAIL "E7 identity continua após reaplicar" "novo id '$novo_id', máximo anterior $max_id_antes"
+fi
+
+# Simula um volume anterior à inclusão de publicado_em, com os dados já publicados.
+dados_antes_migracao="$(admin_sql "$DADOS_SQL")"
+admin_sql "ALTER TABLE metricas_categoria_historico DROP COLUMN publicado_em" >/dev/null
+if dc run --rm --no-deps db-init >"$LOG_DIR/migracao-57.log" 2>&1; then
+  verificar "E7 atualização do histórico preserva dados e instante desconhecido" "$dados_antes_migracao|3" \
+    "$(admin_sql "$DADOS_SQL")|$(admin_sql "SELECT count(*) FROM metricas_categoria_historico WHERE publicado_em IS NULL")"
+  verificar "E7 primeira inserção após atualizar o volume ganha instante real" "t" \
+    "$(escritor_sql "BEGIN;
+      INSERT INTO metricas_categoria_historico (run_id, categoria_id, data_execucao, preco_medio, preco_minimo, preco_maximo, quantidade_produtos)
+      VALUES ('e2e__apos_migracao', 1, DATE '2026-11-21', 1, 1, 1, 1)
+      RETURNING publicado_em BETWEEN transaction_timestamp() AND clock_timestamp();
+      ROLLBACK")"
+else
+  registrar FAIL "E7 atualização do histórico" "ver $LOG_DIR/migracao-57.log"
 fi
 
 # E8. Transação: o arquivo não tem COMMIT próprio e um erro no db-init desfaz o esquema inteiro.

@@ -188,13 +188,11 @@ negado "A9 escritor CREATE TABLE" "permission denied" shopbrasil_writer "$WRITER
 # A10. Pipeline no Airflow sem a Web/API: DAG de sonda com Connection e pool reais.
 servicos="$(dc ps -a --services | sort | tr '\n' ' ')"
 verificar "A10 serviços sem Web/API" "airflow-apiserver airflow-dag-processor airflow-init airflow-scheduler db-init postgres " "$servicos"
-for _ in $(seq 1 60); do
-  dc exec -T airflow-scheduler airflow dags list -o plain 2>/dev/null | grep -q "$DAG_ID" && break
-  sleep 3
-done
+verificar "A10 DAG registrado ao concluir up --wait" "t" "$(admin_sql airflow "SELECT EXISTS (SELECT 1 FROM dag WHERE dag_id = '$DAG_ID')")"
 erros_import="$(admin_sql airflow "SELECT count(*) FROM import_error")"
 verificar "A10 erros de importação" "0" "$erros_import"
 dc exec -T airflow-scheduler airflow dags unpause "$DAG_ID" >/dev/null 2>&1
+verificar "A10 DAG ativo após um unpause" "f" "$(admin_sql airflow "SELECT is_paused FROM dag WHERE dag_id = '$DAG_ID'")"
 dc exec -T airflow-scheduler airflow dags trigger "$DAG_ID" >/dev/null 2>&1
 estado_run=""
 for _ in $(seq 1 80); do

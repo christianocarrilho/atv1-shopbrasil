@@ -56,6 +56,12 @@ CREATE TABLE IF NOT EXISTS public.metricas_categoria_historico (
         CHECK (preco_minimo >= 0 AND preco_minimo <= preco_medio AND preco_medio <= preco_maximo)
 );
 
+-- Adicione sem DEFAULT para preservar a data desconhecida das linhas de volumes anteriores (#57).
+ALTER TABLE public.metricas_categoria_historico
+    ADD COLUMN IF NOT EXISTS publicado_em timestamptz;
+ALTER TABLE public.metricas_categoria_historico
+    ALTER COLUMN publicado_em SET DEFAULT clock_timestamp();
+
 COMMENT ON TABLE public.categoria IS
     'Cadastro de categorias da FakeStore. Linhas permanecem quando a categoria some da coleta.';
 COMMENT ON COLUMN public.categoria.codigo IS
@@ -70,3 +76,5 @@ COMMENT ON COLUMN public.metricas_categoria_historico.run_id IS
     'run_id do DAG run do Airflow que publicou a linha.';
 COMMENT ON COLUMN public.metricas_categoria_historico.data_execucao IS
     'Data de referência da run (ocorrência agendada em America/Sao_Paulo), preservada no reprocessamento.';
+COMMENT ON COLUMN public.metricas_categoria_historico.publicado_em IS
+    'Instante da primeira inserção; NULL em linhas anteriores à inclusão da coluna.';
