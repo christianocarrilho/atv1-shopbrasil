@@ -57,7 +57,7 @@ docker compose exec -e PGPASSWORD="$SHOPBRASIL_DB_READER_PASSWORD" postgres psql
   SELECT m.data_referencia, c.codigo, m.preco_medio, m.preco_minimo, m.preco_maximo, m.quantidade_produtos
     FROM metricas_categoria m JOIN categoria c ON c.id = m.categoria_id ORDER BY 1, 2;"
 docker compose exec -e PGPASSWORD="$SHOPBRASIL_DB_READER_PASSWORD" postgres psql -h postgres -U shopbrasil_reader -d shopbrasil -c "
-  SELECT h.run_id, h.data_execucao AS data_referencia, h.publicado_em, c.codigo, h.preco_medio, h.quantidade_produtos
+  SELECT h.run_id, h.data_execucao, h.publicado_em, c.codigo, h.preco_medio, h.quantidade_produtos
     FROM metricas_categoria_historico h JOIN categoria c ON c.id = h.categoria_id ORDER BY 1, 4;"
 ```
 
@@ -73,7 +73,7 @@ O dia de referência vem sempre da data lógica da run, convertida para Brasíli
 | Como o dia é executado de novo | Snapshot do dia | Histórico |
 |---|---|---|
 | Retry automático de Buscar Produtos | Publicado uma única vez, depois da tentativa bem-sucedida | Uma linha por categoria |
-| **Clear** da run (interface ou `airflow tasks clear`): mesmo `run_id` | Regravado com a nova coleta, sempre uma linha por categoria | As linhas existentes ficam como estavam. Categorias inéditas nessa run ganham uma linha |
+| **Clear** da run (interface ou `airflow tasks clear`): mesmo `run_id` | Regravado com a nova coleta quando o Clear inclui a ingestão, sempre uma linha por categoria | As linhas existentes ficam como estavam. Categorias inéditas nessa run ganham uma linha |
 | **Acionar** na interface ou `airflow dags trigger --logical-date ...` para o mesmo dia: `run_id` novo | Regravado com a nova coleta, sempre uma linha por categoria | Mais uma linha por categoria, com o `run_id` novo |
 | `airflow dags trigger` **sem** `--logical-date` | Não muda | Não muda: a run falha em `preparacao.identificar` com `OcorrenciaAusenteError`, porque não há dia de referência |
 
