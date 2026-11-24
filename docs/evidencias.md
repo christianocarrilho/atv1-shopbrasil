@@ -421,3 +421,25 @@ Executada em 22 nov. 2026 sobre 5d2cfab (`observacoes-revisao`), com todas as ob
 | integrado | PASS | 29 | 0 | 158s |
 
 Novas verificações: I1 `3|60.0|2.0|15|avisos=0`; C7 `1|1`; H2 aviso de divergência `1|0`. Lint de arquitetura `OK: 49 arquivo(s)`; testes unitários do pipeline, do lint e da web aprovados; testes do operador na imagem do Airflow 3.4.0: 4 OK.
+
+## Conferência do avaliador — #12
+
+Executada em 24 nov. 2026 num clone novo de `main` (a3925eb), seguindo só o README e o [guia de execução](execucao.md), com a FakeStore real. Docker 29.9.2, Compose v5.6.1, macOS.
+
+| Passo | Comando | Resultado observado |
+|---|---|---|
+| `.env` | bloco do README | 6 segredos gerados em `sh`, `zsh` e `bash` no macOS e em `sh` no Alpine |
+| Subida | `docker compose up -d --wait` | `db-init` e `airflow-init` `Exited (0)`; demais serviços `healthy` em 25 s, com imagens já baixadas |
+| DAG | `airflow dags list-import-errors`; `dags details` | Sem erros de importação; `timetable_summary 0 6 * * *` |
+| Ativação | `airflow dags unpause shopbrasil_metricas` | Run `scheduled__2026-11-24T09:00:00+00:00` `success` em 10 s; 4 instâncias de `calcular_metricas` no `ecommerce_pool` |
+| Banco | consulta da seção 4 com `shopbrasil_reader` | 4 categorias em 24/11 (electronics 332.50, jewelery 221.00, men's clothing 51.06, women's clothing 26.29); 4 linhas no histórico da run |
+| Painel | `GET /api/metricas/ultima-data`; `GET /` | `{"data":"2026-11-24"}`; HTTP 200 |
+| Run de data específica | `airflow dags trigger ... --run-id manual__2026-11-21` | `success`; 4 linhas em 21/11 |
+| Reprocessamento | `airflow tasks clear ... -s/-e 2026-11-21T09:00:00+00:00 -y` | Todas as tasks na tentativa 2 com `success`; snapshot de 21/11 e histórico de `manual__2026-11-21` continuam com 4 linhas |
+| Queda da API | seção 6 do guia, `FAKESTORE_BASE_URL=http://fakestore.invalid` | `[RETRY]` 1/4, 2/4 e 3/4 com `URLError`; `[FALHA]` e `[ALERTA SIMULADO]` em 4/4; `[FALHA RUN]`; demais tasks `upstream_failed`; snapshot de 21/11 e 24/11 intacto |
+| Interface | `POST /auth/token` com o usuário do `.env` | HTTP 201 |
+| Sem Docker | `python3 -m unittest discover -s pipeline/tests -t pipeline`; `python3 qualidade/lint_arquitetura.py` | 72 testes OK; `OK: 48 arquivo(s)` (antes do #52) |
+
+Achados de documentação, corrigidos neste registro: o README não trazia pré-requisitos, geração dos segredos, ativação do DAG nem o mapa dos requisitos do enunciado; o guia de execução não mostrava como observar retry, callbacks e alerta fora da suíte E2E. A porta 8000 ocupada por outro projeto local exigiu `SHOPBRASIL_WEB_PORT=8001`, caso agora citado no README e no guia.
+
+Repetida em 24 nov. 2026 sobre 3818018 (`main` com o #52): `docker compose up -d --build --wait`, sem erros de importação, run agendada de 24/11 `success` com os mesmos quatro valores, só `[SHOPBRASIL][SUCESSO]` no log (nenhum aviso de ajuste de teste) e 82 testes do pipeline OK (4 do operador pulados fora da imagem do Airflow). Lint `OK: 49 arquivo(s)`.
