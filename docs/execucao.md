@@ -26,7 +26,7 @@ docker compose up -d --build --wait
 | Airflow 3.4 | http://localhost:8080 | usuário `AIRFLOW_ADMIN_USER` do `.env`; LocalExecutor, Connection `shopbrasil_postgres` e pool `ecommerce_pool` (2 slots) |
 | Web/API | http://localhost:8000 | painel em `/`, API em `/api/...`, OpenAPI em `/docs` |
 
-Se as portas 8080 ou 8000 estiverem ocupadas, troque `AIRFLOW_API_PORT` ou `SHOPBRASIL_WEB_PORT` no `.env`. No macOS, se o build da web parar com `additional privileges requested: pass "--allow=fs.read=..."`, a causa é o caminho do clone: uma pasta com acento gravada em forma decomposta (NFD) é recusada pelo Compose 5.6. Clone numa pasta sem acentos ou entre nela por um caminho digitado à mão. O pipeline não depende da web: `docker compose up -d --wait airflow-apiserver airflow-scheduler airflow-dag-processor` sobe só a orquestração.
+Se as portas 8080 ou 8000 estiverem ocupadas, troque `AIRFLOW_API_PORT` ou `SHOPBRASIL_WEB_PORT` no `.env`. O pipeline não depende da web: `docker compose up -d --wait airflow-apiserver airflow-scheduler airflow-dag-processor` sobe só a orquestração.
 
 ## 3. Verificar o DAG
 

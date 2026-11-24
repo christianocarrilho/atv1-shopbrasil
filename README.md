@@ -6,7 +6,7 @@ Matrícula: 262987
 
 Projeto da Atividade 01 de Orquestração de Workflows. Um DAG do Apache Airflow substitui o script agendado no cron: coleta o catálogo da [FakeStore API](https://fakestoreapi.com/docs), valida os produtos, calcula preço médio, mínimo, máximo e quantidade por categoria e publica o resultado no PostgreSQL sem duplicar dados ao reprocessar. Uma Web/API opcional lê as métricas e as mostra num painel.
 
-O foco da atividade é o pipeline. Esta página leva do clone a uma run concluída em poucos minutos e mostra onde cada requisito do [enunciado](<docs/Atividade 01 - Descrição.pdf>) está implementado.
+O foco da atividade é o pipeline. Esta página leva do clone a uma run concluída em poucos minutos e mostra onde cada requisito do [enunciado](docs/atividade-01-descricao.pdf) está implementado.
 
 ## Pré-requisitos
 
@@ -35,7 +35,7 @@ grep '^AIRFLOW_ADMIN_' .env   # usuário e senha da interface do Airflow
 docker compose up -d --build --wait
 ```
 
-O `db-init` aplica o esquema e cria as contas do banco. O `airflow-init` cria o usuário da interface e o pool `ecommerce_pool` com 2 slots. A Connection `shopbrasil_postgres` vem do `.env`. `docker compose ps -a` deve mostrar `db-init` e `airflow-init` com `Exited (0)` e os demais serviços `healthy`.
+O `db-init` aplica o esquema e cria as contas do banco. O `airflow-init` cria o usuário da interface e o pool `ecommerce_pool` com 2 slots. A Connection `shopbrasil_postgres` vem do `.env` por variável de ambiente e por isso não aparece em **Admin → Connections** ([detalhes](docs/ambiente-docker.md#connection-e-pool)). `docker compose ps -a` deve mostrar `db-init` e `airflow-init` com `Exited (0)` e os demais serviços `healthy`.
 
 **3. Ativar o DAG.** O DAG `shopbrasil_metricas` entra pausado. Ao despausá-lo, o Airflow cria uma run para a ocorrência das 06:00 de Brasília mais recente, que termina em menos de um minuto:
 
