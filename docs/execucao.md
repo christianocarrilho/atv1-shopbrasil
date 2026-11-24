@@ -64,8 +64,8 @@ docker compose exec -e PGPASSWORD="$SHOPBRASIL_DB_READER_PASSWORD" postgres psql
   SELECT m.data_referencia, c.codigo, m.preco_medio, m.preco_minimo, m.preco_maximo, m.quantidade_produtos
     FROM metricas_categoria m JOIN categoria c ON c.id = m.categoria_id ORDER BY 1, 2;"
 docker compose exec -e PGPASSWORD="$SHOPBRASIL_DB_READER_PASSWORD" postgres psql -h postgres -U shopbrasil_reader -d shopbrasil -c "
-  SELECT h.run_id, h.data_execucao, c.codigo, h.preco_medio, h.quantidade_produtos
-    FROM metricas_categoria_historico h JOIN categoria c ON c.id = h.categoria_id ORDER BY 1, 3;"
+  SELECT h.run_id, h.data_execucao, h.publicado_em, c.codigo, h.preco_medio, h.quantidade_produtos
+    FROM metricas_categoria_historico h JOIN categoria c ON c.id = h.categoria_id ORDER BY 1, 4;"
 ```
 
 ## 5. Executar de novo o mesmo dia
@@ -73,18 +73,18 @@ docker compose exec -e PGPASSWORD="$SHOPBRASIL_DB_READER_PASSWORD" postgres psql
 O comportamento depende da tabela, porque cada uma tem uma regra de unicidade:
 
 - **`metricas_categoria` (snapshot)** guarda uma linha por dia e categoria. Cada publicação bem-sucedida apaga e regrava as linhas daquela data numa única transação. O painel lê essa tabela. Ela atende ao requisito de idempotência: executar de novo nunca duplica linhas, e o dia fica com os valores da coleta mais recente.
-- **`metricas_categoria_historico` (histórico)** guarda uma linha por run e categoria. É a tabela do opcional "modo append": uma run nova acrescenta linhas, porque é outra execução a acompanhar. Repetir a mesma run não acrescenta nada.
+- **`metricas_categoria_historico` (histórico)** guarda uma linha por run e categoria. É a tabela do opcional "modo append": uma run nova acrescenta linhas, porque é outra execução a acompanhar. Repetir a mesma run preserva as linhas existentes e só acrescenta linhas para categorias inéditas naquela run. `data_execucao` é o dia de referência; `publicado_em` é o instante real da primeira inserção e fica vazio para linhas legadas cujo instante é desconhecido.
 
 O dia de referência vem sempre da data lógica da run, convertida para Brasília, e nunca do relógio.
 
 | Como o dia é executado de novo | Snapshot do dia | Histórico |
 |---|---|---|
 | Retry automático de Buscar Produtos | Publicado uma única vez, depois da tentativa bem-sucedida | Uma linha por categoria |
-| **Clear** da run (interface ou `airflow tasks clear`): mesmo `run_id` | Regravado com a nova coleta, sempre uma linha por categoria | As linhas da run ficam como estavam: nada é acrescentado nem alterado |
+| **Clear** da run (interface ou `airflow tasks clear`): mesmo `run_id` | Regravado com a nova coleta quando o Clear inclui a ingestão, sempre uma linha por categoria | As linhas existentes ficam como estavam. Categorias inéditas nessa run ganham uma linha |
 | **Acionar** na interface ou `airflow dags trigger --logical-date ...` para o mesmo dia: `run_id` novo | Regravado com a nova coleta, sempre uma linha por categoria | Mais uma linha por categoria, com o `run_id` novo |
 | `airflow dags trigger` **sem** `--logical-date` | Não muda | Não muda: a run falha em `preparacao.identificar` com `OcorrenciaAusenteError`, porque não há dia de referência |
 
-No **Clear**, o histórico conserva o que a run publicou da primeira vez. Se a nova coleta trouxer valores diferentes, o snapshot fica com os novos, e o log de `publicacao.publicar` registra `[SHOPBRASIL][AVISO] histórico preservado diverge do snapshot` para cada categoria afetada. Para ter os valores novos também no histórico, dispare uma run nova.
+No **Clear**, o histórico conserva os valores e o instante de publicação registrados pela primeira vez para cada categoria. Se a nova coleta trouxer valores diferentes, o snapshot fica com os novos, e o log de `publicacao.publicar` registra `[SHOPBRASIL][AVISO] histórico preservado diverge do snapshot` para cada categoria afetada. Para ter os valores novos também no histórico, dispare uma run nova.
 
 Para repetir a run do passo 3 pela linha de comando:
 

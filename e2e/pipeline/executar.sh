@@ -366,4 +366,33 @@ verificar "M6 reprocessamento com catálogo vazio falha" "failed" "$(aguardar_ru
 verificar "M6 snapshot de 21/11 preservado" "$SNAPSHOT_PADRAO" "$(snapshot_do_dia 2026-11-21)"
 verificar "M6 snapshot, histórico e cadastro intactos (valores e xmin)" "$ESTADO_ANTES_M6" "$(estado_publicado)"
 
+
+# M7. Clear do DAG real com valores diferentes e categorias inéditas na run (#57).
+historico_original() {
+  leitor_sql "SELECT md5(string_agg(row_to_json(h)::text, ' ' ORDER BY h.categoria_id))
+    FROM metricas_categoria_historico h JOIN categoria c ON c.id = h.categoria_id
+    WHERE h.run_id = '$RUN_AUSENTE' AND c.codigo NOT IN ('toys', 'jewelery')"
+}
+HISTORICO_ANTES_M7="$(historico_original)"
+MARCO_M7="$(leitor_sql 'SELECT clock_timestamp()')"
+fakestore '{"respostas": [{"catalogo": "com_nova"}]}'
+if ! airflow_cli tasks clear "$DAG_ID" -s "2026-11-18T09:00:00+00:00" -e "2026-11-18T09:00:00+00:00" -y >"$LOG_DIR/clear-m7.log" 2>&1; then
+  registrar FAIL "M7 Clear da run original" "ver $LOG_DIR/clear-m7.log"; resumo
+fi
+PUBLICAR_M7=publicacao.publicar
+for _ in $(seq 1 60); do
+  [[ "$(tentativas "$RUN_AUSENTE" "$PUBLICAR_M7")" == "1:success 2:success" ]] && break
+  sleep 3
+done
+verificar "M7 Clear executa nova publicação na mesma run" "1:success 2:success" "$(tentativas "$RUN_AUSENTE" "$PUBLICAR_M7")"
+verificar "M7 snapshot substituído por nova coleta" "electronics=86.50/64.00/109.00/2;jewelery=695.00/695.00/695.00/1;men's clothing=66.13/22.30/109.95/2;toys=67.76/15.50/120.01/2;women's clothing=9.85/9.85/9.85/1" \
+  "$(snapshot_do_dia 2026-11-18)"
+verificar "M7 histórico preserva valores e instantes das linhas originais" "$HISTORICO_ANTES_M7" "$(historico_original)"
+verificar "M7 categorias inéditas na run recebem instante real" "jewelery,toys" \
+  "$(leitor_sql "SELECT string_agg(c.codigo, ',' ORDER BY c.codigo) FROM metricas_categoria_historico h
+    JOIN categoria c ON c.id = h.categoria_id WHERE h.run_id = '$RUN_AUSENTE'
+      AND h.data_execucao = DATE '2026-11-18' AND h.publicado_em BETWEEN '$MARCO_M7'::timestamptz AND clock_timestamp()")"
+verificar "M7 diferenças nas métricas aparecem no log" "1" \
+  "$(contar_log "$RUN_AUSENTE" "$PUBLICAR_M7" 2 "histórico preservado diverge do snapshot: run=$RUN_AUSENTE categoria=electronics")"
+
 resumo
