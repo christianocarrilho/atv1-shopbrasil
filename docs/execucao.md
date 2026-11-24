@@ -37,14 +37,21 @@ docker compose exec airflow-scheduler airflow dags unpause shopbrasil_metricas
 docker compose exec airflow-scheduler airflow dags details shopbrasil_metricas
 ```
 
-Ao despausar, o Airflow cria só a run da ocorrência mais recente. Na interface, o botão **Acionar** dispara uma run manual com a data lógica preenchida com o horário atual. Pela linha de comando, informe a data lógica. 06:00 em Brasília corresponde a 09:00 UTC:
+Ao despausar, o Airflow cria só a run da ocorrência mais recente. Na interface, o botão **Acionar** dispara uma run manual com a data lógica preenchida com o horário atual. Pela linha de comando, informe um instante com `--logical-date`. Às 06:00 em Brasília são 09:00 UTC. Use uma data de referência a partir de 01/11/2026, o `start_date` do DAG. Antes desse limite, o Airflow pode marcar a run como `success` sem executar tarefas. O catálogo é consultado no momento da coleta, inclusive para datas de referência passadas.
 
 ```sh
 docker compose exec airflow-scheduler airflow dags trigger shopbrasil_metricas \
   --logical-date 2026-11-21T09:00:00+00:00 --run-id manual__2026-11-21
 ```
 
-Na interface (Grid), confira a sequência preparação → ingestão (Buscar Produtos → `ValidarProdutosOperator`) → análise (agrupamento, `calcular_metricas` mapeada por categoria no `ecommerce_pool`, consolidação) → publicação, e os registros `[SHOPBRASIL][...]` dos callbacks nos logs das tasks.
+Na interface (Grid), confirme que `publicacao.publicar` executou e ficou em `success`. Confira as linhas da data no banco com a consulta da seção 4. Confira a sequência preparação → ingestão (Buscar Produtos → `ValidarProdutosOperator`) → análise (agrupamento, `calcular_metricas` mapeada por categoria no `ecommerce_pool`, consolidação) → publicação, e os registros `[SHOPBRASIL][...]` dos callbacks nos logs das tasks.
+
+O Airflow exige um instante lógico diferente para cada run deste DAG. Se o exemplo da seção 3 já rodou às 09:00 UTC, uma run com outro `run_id` e o mesmo instante será rejeitada. Para uma nova execução do mesmo dia, use outro horário que ainda pertença a esse dia em Brasília:
+
+```sh
+docker compose exec airflow-scheduler airflow dags trigger shopbrasil_metricas \
+  --logical-date 2026-11-21T10:00:00+00:00 --run-id manual__2026-11-21_segunda
+```
 
 ## 4. Verificar o painel e o banco
 

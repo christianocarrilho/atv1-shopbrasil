@@ -170,4 +170,32 @@ verificar "N7 painel no Chromium com dados do DAG" \
   "4.6.1|86.50,695.00,66.13,67.76,9.85|86.5,695,66.13,67.76,9.85@5|data=2026-11-09;Sem métricas para esta data;Sem métricas para esta data;False|None,None,67.76,None,None@5|spanGaps=False|erros=0" \
   "$(navegador_painel 2026-11-11 2026-11-09 toys 2026-11-09 2026-11-13)"
 
+
+# N8. Disparo manual no mesmo dia e antes do start_date, conforme o guia (#56).
+INSTANTE_REPETIDO="2026-11-11T09:00:00+00:00"
+RUN_REPETIDA="e2e__instante_repetido"
+verificar "N8 instante lógico ocupado pela run original" "$RUN_21" \
+  "$(admin_sql airflow "SELECT run_id FROM dag_run WHERE dag_id = '$DAG_ID' AND logical_date = '$INSTANTE_REPETIDO'")"
+if airflow_cli dags trigger "$DAG_ID" --logical-date "$INSTANTE_REPETIDO" --run-id "$RUN_REPETIDA" >"$LOG_DIR/instante-repetido.log" 2>&1; then
+  registrar FAIL "N8 instante lógico repetido" "disparo aceito"; resumo
+fi
+if grep -qF 'duplicate key value' "$LOG_DIR/instante-repetido.log" &&
+    grep -qF 'Key (dag_id, logical_date)=' "$LOG_DIR/instante-repetido.log"; then
+  registrar PASS "N8 motivo da rejeição" "instante lógico já ocupado"
+else
+  registrar FAIL "N8 motivo da rejeição" "ver $LOG_DIR/instante-repetido.log"
+fi
+verificar "N8 instante lógico repetido não cria run" "0" \
+  "$(admin_sql airflow "SELECT count(*) FROM dag_run WHERE dag_id = '$DAG_ID' AND run_id = '$RUN_REPETIDA'")"
+RUN_NOVA="e2e__outro_horario"
+publicar_dia "N8" sem_joias "2026-11-11T10:00:00+00:00" "$RUN_NOVA"
+verificar "N8 snapshot substituído e histórico separado por run" "$SEM_JOIAS|$COM_NOVA|$SEM_JOIAS" \
+  "$(snapshot_do_dia 2026-11-11)|$(historico_da_run "$RUN_21")|$(historico_da_run "$RUN_NOVA")"
+
+RUN_ANTIGA="e2e__antes_start_date"
+airflow_cli dags trigger "$DAG_ID" --logical-date "2026-10-31T09:00:00+00:00" --run-id "$RUN_ANTIGA" >"$LOG_DIR/antes-start-date.log" 2>&1
+verificar "N8 run anterior ao start_date" "success" "$(aguardar_run "$DAG_ID" "$RUN_ANTIGA")"
+verificar "N8 run anterior sem tasks nem snapshot" "0|0" \
+  "$(admin_sql airflow "SELECT count(*) FROM task_instance WHERE dag_id = '$DAG_ID' AND run_id = '$RUN_ANTIGA'")|$(leitor_sql "SELECT count(*) FROM metricas_categoria WHERE data_referencia = '2026-10-31'")"
+
 resumo
