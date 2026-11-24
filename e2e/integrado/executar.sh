@@ -167,16 +167,18 @@ verificar "N7 painel no Chromium com dados do DAG" \
 
 
 # N8. Disparo manual no mesmo dia e antes do start_date, conforme o guia (#56).
-if airflow_cli dags trigger "$DAG_ID" --logical-date "2026-11-11T09:00:00+00:00" --run-id "e2e__instante_repetido" >"$LOG_DIR/instante-repetido.log" 2>&1; then
-  registrar FAIL "N8 instante lógico repetido" "disparo aceito"
-elif grep -qF 'dag_run_dag_id_logical_date_key' "$LOG_DIR/instante-repetido.log"; then
-  registrar PASS "N8 instante lógico repetido" "Airflow rejeitou o instante já usado"
-else
-  registrar FAIL "N8 instante lógico repetido" "erro inesperado em $LOG_DIR/instante-repetido.log"
+INSTANTE_REPETIDO="2026-11-11T09:00:00+00:00"
+RUN_REPETIDA="e2e__instante_repetido"
+verificar "N8 instante lógico ocupado pela run original" "$RUN_21" \
+  "$(admin_sql airflow "SELECT run_id FROM dag_run WHERE dag_id = '$DAG_ID' AND logical_date = '$INSTANTE_REPETIDO'")"
+if airflow_cli dags trigger "$DAG_ID" --logical-date "$INSTANTE_REPETIDO" --run-id "$RUN_REPETIDA" >"$LOG_DIR/instante-repetido.log" 2>&1; then
+  registrar FAIL "N8 instante lógico repetido" "disparo aceito"; resumo
 fi
+verificar "N8 instante lógico repetido não cria run" "0" \
+  "$(admin_sql airflow "SELECT count(*) FROM dag_run WHERE dag_id = '$DAG_ID' AND run_id = '$RUN_REPETIDA'")"
 RUN_NOVA="e2e__outro_horario"
-publicar_dia "N8" com_nova "2026-11-11T10:00:00+00:00" "$RUN_NOVA"
-verificar "N8 snapshot único e histórico por run" "$COM_NOVA|$COM_NOVA|$COM_NOVA" \
+publicar_dia "N8" sem_joias "2026-11-11T10:00:00+00:00" "$RUN_NOVA"
+verificar "N8 snapshot substituído e histórico separado por run" "$SEM_JOIAS|$COM_NOVA|$SEM_JOIAS" \
   "$(snapshot_do_dia 2026-11-11)|$(historico_da_run "$RUN_21")|$(historico_da_run "$RUN_NOVA")"
 
 RUN_ANTIGA="e2e__antes_start_date"
