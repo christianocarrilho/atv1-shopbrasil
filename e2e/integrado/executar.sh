@@ -174,6 +174,12 @@ verificar "N8 instante lógico ocupado pela run original" "$RUN_21" \
 if airflow_cli dags trigger "$DAG_ID" --logical-date "$INSTANTE_REPETIDO" --run-id "$RUN_REPETIDA" >"$LOG_DIR/instante-repetido.log" 2>&1; then
   registrar FAIL "N8 instante lógico repetido" "disparo aceito"; resumo
 fi
+if grep -qF 'duplicate key value' "$LOG_DIR/instante-repetido.log" &&
+    grep -qF 'Key (dag_id, logical_date)=' "$LOG_DIR/instante-repetido.log"; then
+  registrar PASS "N8 motivo da rejeição" "instante lógico já ocupado"
+else
+  registrar FAIL "N8 motivo da rejeição" "ver $LOG_DIR/instante-repetido.log"
+fi
 verificar "N8 instante lógico repetido não cria run" "0" \
   "$(admin_sql airflow "SELECT count(*) FROM dag_run WHERE dag_id = '$DAG_ID' AND run_id = '$RUN_REPETIDA'")"
 RUN_NOVA="e2e__outro_horario"
