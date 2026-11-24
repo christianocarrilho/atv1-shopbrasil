@@ -165,4 +165,24 @@ verificar "N7 painel no Chromium com dados do DAG" \
   "4.6.1|86.50,695.00,66.13,67.76,9.85|86.5,695,66.13,67.76,9.85@5|data=2026-11-09;Sem métricas para esta data;Sem métricas para esta data;False|None,None,67.76,None,None@5|spanGaps=False|erros=0" \
   "$(navegador_painel 2026-11-11 2026-11-09 toys 2026-11-09 2026-11-13)"
 
+
+# N8. Disparo manual no mesmo dia e antes do start_date, conforme o guia (#56).
+if airflow_cli dags trigger "$DAG_ID" --logical-date "2026-11-11T09:00:00+00:00" --run-id "e2e__instante_repetido" >"$LOG_DIR/instante-repetido.log" 2>&1; then
+  registrar FAIL "N8 instante lógico repetido" "disparo aceito"
+elif grep -qF 'dag_run_dag_id_logical_date_key' "$LOG_DIR/instante-repetido.log"; then
+  registrar PASS "N8 instante lógico repetido" "Airflow rejeitou o instante já usado"
+else
+  registrar FAIL "N8 instante lógico repetido" "erro inesperado em $LOG_DIR/instante-repetido.log"
+fi
+RUN_NOVA="e2e__outro_horario"
+publicar_dia "N8" com_nova "2026-11-11T10:00:00+00:00" "$RUN_NOVA"
+verificar "N8 snapshot único e histórico por run" "$COM_NOVA|$COM_NOVA|$COM_NOVA" \
+  "$(snapshot_do_dia 2026-11-11)|$(historico_da_run "$RUN_21")|$(historico_da_run "$RUN_NOVA")"
+
+RUN_ANTIGA="e2e__antes_start_date"
+airflow_cli dags trigger "$DAG_ID" --logical-date "2026-10-31T09:00:00+00:00" --run-id "$RUN_ANTIGA" >"$LOG_DIR/antes-start-date.log" 2>&1
+verificar "N8 run anterior ao start_date" "success" "$(aguardar_run "$DAG_ID" "$RUN_ANTIGA")"
+verificar "N8 run anterior sem tasks nem snapshot" "0|0" \
+  "$(admin_sql airflow "SELECT count(*) FROM task_instance WHERE dag_id = '$DAG_ID' AND run_id = '$RUN_ANTIGA'")|$(leitor_sql "SELECT count(*) FROM metricas_categoria WHERE data_referencia = '2026-10-31'")"
+
 resumo
