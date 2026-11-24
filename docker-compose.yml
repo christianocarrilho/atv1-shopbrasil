@@ -138,10 +138,20 @@ services:
   airflow-dag-processor:
     <<: *airflow-common
     command: dag-processor
+    environment:
+      <<: *airflow-common-env
+      SHOPBRASIL_DAG_PRONTIDAO: shopbrasil_metricas
     healthcheck:
-      test: ["CMD-SHELL", 'airflow jobs check --job-type DagProcessorJob --hostname "$${HOSTNAME}"']
+      # O heartbeat pode estar saudável antes de o primeiro DAG ser registrado.
+      test:
+        - CMD-SHELL
+        - >-
+          airflow jobs check --job-type DagProcessorJob --hostname "$${HOSTNAME}" &&
+          airflow dags list -o json |
+          python -c 'import json, sys; sys.exit(not any(dag["dag_id"] == sys.argv[1] for dag in json.load(sys.stdin)))'
+          "$${SHOPBRASIL_DAG_PRONTIDAO}"
       interval: 15s
-      timeout: 15s
+      timeout: 30s
       retries: 10
       start_period: 30s
     restart: unless-stopped

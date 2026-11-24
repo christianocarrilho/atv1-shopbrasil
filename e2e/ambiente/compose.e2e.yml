@@ -22,5 +22,7 @@ services:
     volumes:
       - ./e2e/ambiente/fixtures/dags:/opt/airflow/dags:ro
   airflow-dag-processor:
+    environment:
+      SHOPBRASIL_DAG_PRONTIDAO: e2e_ambiente_sonda
     volumes:
       - ./e2e/ambiente/fixtures/dags:/opt/airflow/dags:ro

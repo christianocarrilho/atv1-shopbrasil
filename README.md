@@ -35,9 +35,9 @@ grep '^AIRFLOW_ADMIN_' .env   # usuário e senha da interface do Airflow
 docker compose up -d --build --wait
 ```
 
-O `db-init` aplica o esquema e cria as contas do banco. O `airflow-init` cria o usuário da interface e o pool `ecommerce_pool` com 2 slots. A Connection `shopbrasil_postgres` vem do `.env` por variável de ambiente e por isso não aparece em **Admin → Connections** ([detalhes](docs/ambiente-docker.md#connection-e-pool)). `docker compose ps -a` deve mostrar `db-init` e `airflow-init` com `Exited (0)` e os demais serviços `healthy`.
+O `db-init` aplica o esquema e cria as contas do banco. O `airflow-init` cria o usuário da interface e o pool `ecommerce_pool` com 2 slots. A Connection `shopbrasil_postgres` vem do `.env` por variável de ambiente e por isso não aparece em **Admin → Connections** ([detalhes](docs/ambiente-docker.md#connection-e-pool)). `docker compose ps -a` deve mostrar `db-init` e `airflow-init` com `Exited (0)` e os demais serviços `healthy`. O `--wait` aguarda também o registro do DAG `shopbrasil_metricas`. Se a subida falhar no processador, consulte `docker compose logs airflow-dag-processor` e `docker compose exec airflow-dag-processor airflow dags list-import-errors` se o contêiner estiver em execução.
 
-**3. Ativar o DAG.** O DAG `shopbrasil_metricas` entra pausado. Ao despausá-lo, o Airflow cria uma run para a ocorrência das 06:00 de Brasília mais recente, que termina em menos de um minuto:
+**3. Ativar o DAG.** O DAG `shopbrasil_metricas` entra pausado. Ao despausá-lo, o Airflow cria uma run para a ocorrência das 06:00 de Brasília mais recente, cujo estado pode ser acompanhado com `list-runs`. Aguarde `success` e confirme no Graph que a task `publicacao.publicar` ficou em `success` antes de abrir o painel:
 
 ```sh
 docker compose exec airflow-scheduler airflow dags unpause shopbrasil_metricas

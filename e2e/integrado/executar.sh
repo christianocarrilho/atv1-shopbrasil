@@ -74,16 +74,21 @@ SEM_JOIAS="electronics=64.00/64.00/64.00/1;men's clothing=109.95/109.95/109.95/1
 
 echo "Projeto Compose isolado: $PROJECT (Airflow em 127.0.0.1:$AIRFLOW_API_PORT_E2E, web em $BASE)"
 subir_airflow "N0 subida do Airflow"
+if [[ "$(admin_sql airflow "SELECT EXISTS (SELECT 1 FROM dag WHERE dag_id = '$DAG_ID')")" == t ]]; then
+  registrar PASS "N0 DAG registrado ao concluir up --wait" "$DAG_ID"
+else
+  registrar FAIL "N0 DAG registrado ao concluir up --wait" "DAG ausente"; resumo
+fi
 if dc up -d --build --wait --wait-timeout 300 web >"$LOG_DIR/up-web.log" 2>&1; then
   registrar PASS "N0 subida da web" "up --build --wait concluído"
 else
   registrar FAIL "N0 subida da web" "ver $LOG_DIR/up-web.log"; resumo
 fi
-if aguardar_dag "$DAG_ID"; then registrar PASS "N0 DAG registrado" "$DAG_ID"; else registrar FAIL "N0 DAG registrado" "ausente"; resumo; fi
 verificar "N0 painel antes da primeira publicação" "null" "$(json /api/metricas/ultima-data | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["data"]))')"
 # DAG entra pausado; ao despausar, o Airflow (catchup=False) cria a run da ocorrência mais recente.
 # Ela usa o catálogo padrão e termina antes das runs do cenário, para não concorrer com elas.
 airflow_cli dags unpause "$DAG_ID" >/dev/null 2>&1
+verificar "N0 DAG ativo após um unpause" "f" "$(admin_sql airflow "SELECT is_paused FROM dag WHERE dag_id = '$DAG_ID'")"
 AGENDADA=""
 for _ in $(seq 1 40); do
   AGENDADA="$(admin_sql airflow "SELECT run_id FROM dag_run WHERE dag_id = '$DAG_ID' AND run_type = 'scheduled' LIMIT 1")"
