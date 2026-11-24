@@ -74,7 +74,11 @@ SEM_JOIAS="electronics=64.00/64.00/64.00/1;men's clothing=109.95/109.95/109.95/1
 
 echo "Projeto Compose isolado: $PROJECT (Airflow em 127.0.0.1:$AIRFLOW_API_PORT_E2E, web em $BASE)"
 subir_airflow "N0 subida do Airflow"
-verificar "N0 DAG registrado ao concluir up --wait" "t" "$(admin_sql airflow "SELECT EXISTS (SELECT 1 FROM dag WHERE dag_id = '$DAG_ID')")"
+if [[ "$(admin_sql airflow "SELECT EXISTS (SELECT 1 FROM dag WHERE dag_id = '$DAG_ID')")" == t ]]; then
+  registrar PASS "N0 DAG registrado ao concluir up --wait" "$DAG_ID"
+else
+  registrar FAIL "N0 DAG registrado ao concluir up --wait" "DAG ausente"; resumo
+fi
 if dc up -d --build --wait --wait-timeout 300 web >"$LOG_DIR/up-web.log" 2>&1; then
   registrar PASS "N0 subida da web" "up --build --wait concluído"
 else

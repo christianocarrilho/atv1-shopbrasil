@@ -151,7 +151,7 @@ services:
           python -c 'import json, sys; sys.exit(not any(dag["dag_id"] == sys.argv[1] for dag in json.load(sys.stdin)))'
           "$${SHOPBRASIL_DAG_PRONTIDAO}"
       interval: 15s
-      timeout: 15s
+      timeout: 30s
       retries: 10
       start_period: 30s
     restart: unless-stopped
