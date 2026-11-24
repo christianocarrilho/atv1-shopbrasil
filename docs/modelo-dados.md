@@ -48,6 +48,7 @@ Unicidade `metricas_categoria_data_categoria_uk` em `(data_referencia, categoria
 |---|---|---|
 | `run_id` | `text NOT NULL` | `run_id` do DAG run do Airflow; não pode ser vazio. |
 | `categoria_id` | `integer NOT NULL` | FK `metricas_categoria_historico_categoria_fk` para `categoria(id)`, `ON DELETE RESTRICT`. |
+| `publicado_em` | `timestamptz` | Instante da primeira inserção da linha, preenchido pelo PostgreSQL. Linhas anteriores à inclusão da coluna ficam com `NULL`. |
 | `data_execucao` | `date NOT NULL` | Data de referência da run, a mesma de `metricas_categoria.data_referencia` na publicação. Segue o sentido de data lógica da run no Airflow, e não o instante em que a task rodou, para que o reprocessamento preserve o valor. |
 | `preco_medio`, `preco_minimo`, `preco_maximo` | `numeric(12,2) NOT NULL` | |
 | `quantidade_produtos` | `integer NOT NULL` | |

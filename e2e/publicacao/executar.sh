@@ -101,6 +101,8 @@ SNAP_D0="$(snapshot "$D0")"
 FIS_D0="$(linhas_fisicas "$D0")"
 verificar "U2 snapshot de $D0" "electronics=20.00/15.00/25.00/2 men's clothing=30.00/30.00/30.00/1" "$SNAP_D0"
 
+MARCO_PUBLICACAO="$(reader_sql 'SELECT clock_timestamp()')"
+
 # U3. Publicação inicial de D1 com uma categoria nova e outra já cadastrada.
 M1="$(lista "$(m electronics 10.00 10.00 10.01 3)" "$(m jewelery 10.01 10.00 10.01 2)")"
 saida="$(publicar publicar "$R1" "$D1" "$M1")"
@@ -120,6 +122,12 @@ verificar "H1 histórico de $R1" "electronics=$D1/10.00/10.00/10.01/3 jewelery=$
 verificar "H1 histórico igual ao snapshot publicado (linhas|divergentes)" "2|0;2|0" \
   "$(historico_igual_snapshot "$R0");$(historico_igual_snapshot "$R1")"
 HIST_FIS_H1="$(historico_fisico)"
+verificar "H1 execução retroativa mantém referência e registra instante real" "2" \
+  "$(reader_sql "SELECT count(*) FROM metricas_categoria_historico
+    WHERE run_id = '$R1' AND data_execucao = '$D1'
+      AND publicado_em BETWEEN '$MARCO_PUBLICACAO'::timestamptz AND clock_timestamp()")"
+INSTANTES_H1="$(reader_sql "SELECT string_agg(categoria_id || ':' || publicado_em::text, ' ' ORDER BY categoria_id)
+  FROM metricas_categoria_historico WHERE run_id = '$R1'")"
 
 # U5. Republicação da mesma data (reprocessamento da mesma run): jewelery fica fora do dia,
 # women's clothing entra e electronics é substituída.
@@ -148,6 +156,14 @@ verificar "H2 linhas originais intactas (chave e xmin)" "$HIST_FIS_H1" \
     FROM metricas_categoria_historico h WHERE NOT EXISTS (SELECT 1 FROM categoria c WHERE c.id = h.categoria_id AND c.codigo = 'women''s clothing')")"
 verificar "H2 histórico sem duplicatas: 5 linhas, máximo 1 por run+categoria" "5|1" \
   "$(reader_sql "SELECT count(*) FROM metricas_categoria_historico")|$(max_hist_por_chave)"
+verificar "H2 instantes das linhas existentes preservados" "$INSTANTES_H1" \
+  "$(reader_sql "SELECT string_agg(h.categoria_id || ':' || h.publicado_em::text, ' ' ORDER BY h.categoria_id)
+    FROM metricas_categoria_historico h JOIN categoria c ON c.id = h.categoria_id
+    WHERE h.run_id = '$R1' AND c.codigo <> 'women''s clothing'")"
+verificar "H2 categoria nova recebe seu instante de primeira inserção" "1" \
+  "$(reader_sql "SELECT count(*) FROM metricas_categoria_historico h JOIN categoria c ON c.id = h.categoria_id
+    WHERE h.run_id = '$R1' AND c.codigo = 'women''s clothing'
+      AND h.publicado_em BETWEEN '$MARCO_PUBLICACAO'::timestamptz AND clock_timestamp()")"
 # H2. A divergência entre o histórico preservado e o snapshot novo não passa em silêncio: um aviso
 # para electronics (valores mudaram) e nenhum para women's clothing (chave nova, gravada igual).
 verificar "H2 aviso de divergência só para a categoria alterada" "1|0" \
