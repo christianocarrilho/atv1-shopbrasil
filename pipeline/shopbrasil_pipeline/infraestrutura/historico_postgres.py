@@ -8,8 +8,9 @@ Implementa ``EtapaTransacional`` do adaptador da #17: com o cursor da transaçã
 ``metricas_categoria_historico`` as quatro métricas de cada categoria publicada, com o ``run_id``
 da execução e ``data_execucao`` igual à data de referência. ``ON CONFLICT (run_id, categoria_id)
 DO NOTHING`` faz o append: uma run distinta acrescenta linhas e o reprocessamento da mesma run
-mantém as já registradas, sem atualizá-las, como manda a especificação. Se o reprocessamento
-publicar valores diferentes dos já registrados para a run, a etapa relê as linhas da run e emite um
+mantém as já registradas, sem atualizá-las, como manda a especificação. Antes do INSERT, a etapa lê as
+linhas que a run já tem: a contagem vai para a linha ``[SHOPBRASIL][HISTORICO]`` (gravadas e
+preservadas) e, se o reprocessamento publicar valores diferentes dos já registrados, a etapa emite um
 aviso ``[SHOPBRASIL][AVISO] histórico preservado diverge do snapshot`` por categoria, para que a
 diferença entre snapshot e histórico nunca passe em silêncio. A etapa não faz commit nem rollback;
 uma exceção do banco desfaz cadastro e snapshot junto com o histórico.
@@ -55,6 +56,8 @@ class RegistrarHistoricoPostgres:
 
     def __call__(self, cursor: Any, snapshot: SnapshotNaTransacao) -> list[str]:
         execucao = snapshot.execucao
+        # Lido antes do INSERT: as linhas que já existem são as que o ON CONFLICT vai preservar.
+        divergentes, preservadas = self._avisar_divergencias(cursor, snapshot)
         # Os mesmos objetos Decimal do snapshot vão ao driver, por isso os valores coincidem.
         cursor.executemany(
             _SQL_INSERIR_HISTORICO,
@@ -71,11 +74,21 @@ class RegistrarHistoricoPostgres:
                 for m in snapshot.metricas
             ],
         )
-        return self._avisar_divergencias(cursor, snapshot)
+        log.info(
+            "[SHOPBRASIL][HISTORICO] run=%s: %d linha(s) gravada(s), %d já registrada(s) "
+            "preservada(s) sem alteração",
+            execucao.run_id,
+            len(snapshot.metricas) - preservadas,
+            preservadas,
+        )
+        return divergentes
 
     @staticmethod
-    def _avisar_divergencias(cursor: Any, snapshot: SnapshotNaTransacao) -> list[str]:
-        """Compara o histórico da run com o snapshot recém-gravado e avisa cada categoria diferente."""
+    def _avisar_divergencias(cursor: Any, snapshot: SnapshotNaTransacao) -> tuple[list[str], int]:
+        """Compara o histórico já registrado da run com o snapshot e avisa cada categoria diferente.
+
+        Devolve as categorias divergentes e quantas linhas a run já tinha.
+        """
         execucao = snapshot.execucao
         publicados = {
             snapshot.categoria_ids[m.codigo_categoria]: (m.codigo_categoria, (m.preco_medio, m.preco_minimo, m.preco_maximo, m.quantidade_produtos))
@@ -83,9 +96,10 @@ class RegistrarHistoricoPostgres:
         }
         cursor.execute(_SQL_LER_HISTORICO_DA_RUN, (execucao.run_id, list(publicados)))
         divergentes = []
-        for categoria_id, *registrado in cursor.fetchall():
+        registradas = cursor.fetchall()
+        for categoria_id, *registrado in registradas:
             codigo, publicado = publicados[categoria_id]
             if tuple(registrado) != publicado:
                 log.warning(AVISO_DIVERGENCIA, execucao.run_id, codigo, _metricas(tuple(registrado)), _metricas(publicado))
                 divergentes.append(codigo)
-        return sorted(divergentes)
+        return sorted(divergentes), len(registradas)

@@ -37,7 +37,7 @@ docker compose exec airflow-scheduler airflow dags unpause shopbrasil_metricas
 docker compose exec airflow-scheduler airflow dags details shopbrasil_metricas
 ```
 
-Ao despausar, o Airflow cria só a run da ocorrência mais recente. Para uma run manual de uma ocorrência específica:
+Ao despausar, o Airflow cria só a run da ocorrência mais recente. Na interface, o botão **Acionar** dispara uma run manual com a data lógica preenchida com o horário atual. Pela linha de comando, informe a data lógica. 06:00 em Brasília corresponde a 09:00 UTC:
 
 ```sh
 docker compose exec airflow-scheduler airflow dags trigger shopbrasil_metricas \
@@ -61,16 +61,47 @@ docker compose exec -e PGPASSWORD="$SHOPBRASIL_DB_READER_PASSWORD" postgres psql
     FROM metricas_categoria_historico h JOIN categoria c ON c.id = h.categoria_id ORDER BY 1, 3;"
 ```
 
-## 5. Reprocessar a própria run
+## 5. Executar de novo o mesmo dia
 
-Limpar as tasks da run executa de novo a mesma run, com o mesmo `run_id` e a mesma data de referência (derivada da data lógica, não do relógio). O snapshot do dia é substituído na mesma transação e o histórico da run não duplica (`run_id` + categoria).
+O comportamento depende da tabela, porque cada uma tem uma regra de unicidade:
+
+- **`metricas_categoria` (snapshot)** guarda uma linha por dia e categoria. Cada publicação bem-sucedida apaga e regrava as linhas daquela data numa única transação. O painel lê essa tabela. Ela atende ao requisito de idempotência: executar de novo nunca duplica linhas, e o dia fica com os valores da coleta mais recente.
+- **`metricas_categoria_historico` (histórico)** guarda uma linha por run e categoria. É a tabela do opcional "modo append": uma run nova acrescenta linhas, porque é outra execução a acompanhar. Repetir a mesma run não acrescenta nada.
+
+O dia de referência vem sempre da data lógica da run, convertida para Brasília, e nunca do relógio.
+
+| Como o dia é executado de novo | Snapshot do dia | Histórico |
+|---|---|---|
+| Retry automático de Buscar Produtos | Publicado uma única vez, depois da tentativa bem-sucedida | Uma linha por categoria |
+| **Clear** da run (interface ou `airflow tasks clear`): mesmo `run_id` | Regravado com a nova coleta, sempre uma linha por categoria | As linhas da run ficam como estavam: nada é acrescentado nem alterado |
+| **Acionar** na interface ou `airflow dags trigger --logical-date ...` para o mesmo dia: `run_id` novo | Regravado com a nova coleta, sempre uma linha por categoria | Mais uma linha por categoria, com o `run_id` novo |
+| `airflow dags trigger` **sem** `--logical-date` | Não muda | Não muda: a run falha em `preparacao.identificar` com `OcorrenciaAusenteError`, porque não há dia de referência |
+
+No **Clear**, o histórico conserva o que a run publicou da primeira vez. Se a nova coleta trouxer valores diferentes, o snapshot fica com os novos, e o log de `publicacao.publicar` registra `[SHOPBRASIL][AVISO] histórico preservado diverge do snapshot` para cada categoria afetada. Para ter os valores novos também no histórico, dispare uma run nova.
+
+Para repetir a run do passo 3 pela linha de comando:
 
 ```sh
 docker compose exec airflow-scheduler airflow tasks clear shopbrasil_metricas \
   -s 2026-11-21T09:00:00+00:00 -e 2026-11-21T09:00:00+00:00 -y
 ```
 
-Na interface: abra a run, **Clear** → **Clear existing tasks**. Uma run criada sem data lógica é recusada em `preparacao.identificar`, com a orientação de reprocessar por limpeza.
+Na interface, abra a run e use **Clear** → **Clear existing tasks**. O log de `publicacao.publicar` mostra o que aconteceu em cada tabela:
+
+```text
+[SHOPBRASIL][HISTORICO] run=manual__2026-11-21: 0 linha(s) gravada(s), 4 já registrada(s) preservada(s) sem alteração
+[SHOPBRASIL][PUBLICACAO] run=manual__2026-11-21 data=2026-11-21 snapshot: 4 linha(s) anterior(es) do dia substituída(s) por 4; categoria(s) nova(s) no cadastro: nenhuma
+```
+
+Na primeira execução do dia, as linhas são `4 linha(s) gravada(s), 0 já registrada(s)` e `0 linha(s) anterior(es) do dia substituída(s) por 4`. Para conferir as contagens no banco (com o `.env` carregado, como na seção 4):
+
+```sh
+docker compose exec -e PGPASSWORD="$SHOPBRASIL_DB_READER_PASSWORD" postgres psql -h postgres -U shopbrasil_reader -d shopbrasil \
+  -c "SELECT data_referencia, count(*) FROM metricas_categoria GROUP BY 1 ORDER BY 1;" \
+  -c "SELECT run_id, count(*) FROM metricas_categoria_historico GROUP BY 1 ORDER BY 1;"
+```
+
+O snapshot mostra sempre uma linha por categoria em cada data. O histórico mostra uma linha por categoria em cada run.
 
 ## 6. Simular queda da API
 

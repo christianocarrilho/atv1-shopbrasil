@@ -443,3 +443,20 @@ Executada em 24 nov. 2026 num clone novo de `main` (a3925eb), seguindo só o REA
 Achados de documentação, corrigidos neste registro: o README não trazia pré-requisitos, geração dos segredos, ativação do DAG nem o mapa dos requisitos do enunciado; o guia de execução não mostrava como observar retry, callbacks e alerta fora da suíte E2E. A porta 8000 ocupada por outro projeto local exigiu `SHOPBRASIL_WEB_PORT=8001`, caso agora citado no README e no guia.
 
 Repetida em 24 nov. 2026 sobre 3818018 (`main` com o #52): `docker compose up -d --build --wait`, sem erros de importação, run agendada de 24/11 `success` com os mesmos quatro valores, só `[SHOPBRASIL][SUCESSO]` no log (nenhum aviso de ajuste de teste) e 82 testes do pipeline OK (4 do operador pulados fora da imagem do Airflow). Lint `OK: 49 arquivo(s)`.
+
+## Reexecução do mesmo dia e log da publicação — #12, #17, #18
+
+Em 24 nov. 2026, sobre `main` c4c01fe, foram registradas no log as contagens da publicação e reescrito o texto sobre reexecução no [guia](execucao.md#5-executar-de-novo-o-mesmo-dia) e no [README do pipeline](../pipeline/README.md). O texto anterior dizia "não dispare uma run nova" e "run sem data lógica é recusada", mas o botão **Acionar** da interface preenche a data lógica e funciona. O comportamento não mudou, só a forma de explicá-lo.
+
+Conferência manual com FakeStore real, num ambiente limpo:
+
+| Ação | Snapshot do dia | Histórico | Log de `publicacao.publicar` |
+|---|---|---|---|
+| Run agendada de 24/11 | 4 linhas | 4 linhas da run | `0 linha(s) anterior(es) do dia substituída(s) por 4`; `4 linha(s) gravada(s), 0 já registrada(s)` |
+| `trigger --logical-date` para 21/11 | 4 linhas | 4 linhas da run | idem |
+| Clear de `manual__2026-11-21` | 4 linhas | 4 linhas da run | `4 linha(s) anterior(es) do dia substituída(s) por 4`; `0 linha(s) gravada(s), 4 já registrada(s) preservada(s)` |
+| Acionar na interface e `trigger --logical-date` no mesmo dia 24/11 (teste anterior, sem o log novo) | continua com 4 linhas | +4 linhas por run nova | — |
+| `trigger` sem `--logical-date` | sem mudança | sem mudança | `[SHOPBRASIL][FALHA] ... OcorrenciaAusenteError: run 'sem_data' sem data lógica, então não há dia de referência para publicar; dispare com --logical-date ...` |
+
+Verificações: 85 testes unitários do pipeline OK (4 do operador pulados fora da imagem do Airflow), lint `OK: 49 arquivo(s)`. E2E `e2e/executar_todos.sh pipeline publicacao integrado`: pipeline **72 PASS**, publicacao **45 PASS**, integrado **29 PASS**, 0 FAIL. O integrado falhou duas vezes antes de passar, no build da web, com `additional privileges requested: pass "--allow=fs.read=..."`. A causa era o diretório local do autor, com acento gravado em forma decomposta (NFD), que o Compose 5.6.1 recusa como contexto de build. Executado pelo mesmo diretório em forma composta (NFC), passou. Os nomes versionados do repositório não têm mais acentos nem espaços: o enunciado passou a ser `docs/atividade-01-descricao.pdf`.
+

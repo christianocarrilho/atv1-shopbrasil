@@ -10,9 +10,14 @@ Orquestra e executa a coleta, a análise e a publicação das métricas.
 
 O DAG fica em [dags/shopbrasil_metricas.py](dags/shopbrasil_metricas.py). Roda diariamente às 06:00 em `America/Sao_Paulo` (`CronTriggerTimetable`), com `start_date` em 1º nov. 2026 e `catchup=False`. As etapas ficam nos TaskGroups `preparacao`, `ingestao`, `analise` e `publicacao`, ligadas pelas chamadas TaskFlow.
 
-A data de referência é a data civil, em Brasília, da data lógica da run. No Airflow 3.4 a data lógica de uma run agendada é a própria ocorrência das 06:00, sem intervalo de dados. A regra fica em `shopbrasil_pipeline/dominio/calendario.py` e não usa o relógio. Uma run sem data lógica falha em `preparacao.identificar`.
+A data de referência é a data civil, em Brasília, da data lógica da run. No Airflow 3.4 a data lógica de uma run agendada é a própria ocorrência das 06:00, sem intervalo de dados. A regra fica em `shopbrasil_pipeline/dominio/calendario.py` e não usa o relógio. Uma run manual criada pelo botão **Acionar** da interface tem a data lógica preenchida com o horário do disparo. Só `airflow dags trigger` sem `--logical-date` cria uma run sem data lógica, e essa run falha em `preparacao.identificar` com a orientação de como disparar.
 
-Para reprocessar, limpe as tasks da própria run (na interface, *Clear*, ou `airflow tasks clear shopbrasil_metricas -s <data lógica> -e <data lógica> -y`). O `run_id` e a data de referência são preservados. Não dispare uma run nova para refazer um dia.
+Executar o mesmo dia de novo nunca duplica o snapshot: cada publicação bem-sucedida substitui as linhas daquela data. Há dois caminhos:
+
+- **Clear** da run (na interface, ou `airflow tasks clear shopbrasil_metricas -s <data lógica> -e <data lógica> -y`): repete a mesma run, com o mesmo `run_id` e a mesma data de referência. O histórico da run não ganha linhas nem tem os valores alterados.
+- **Run nova** no mesmo dia: também substitui o snapshot e acrescenta ao histórico uma linha por categoria com o `run_id` novo, como pede o modo append.
+
+O [guia de execução](../docs/execucao.md#5-executar-de-novo-o-mesmo-dia) traz a tabela completa e mostra como conferir pelo log e pelo banco.
 
 ## Buscar Produtos — #13
 

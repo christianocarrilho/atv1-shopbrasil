@@ -4,7 +4,7 @@
 Código de pessoa: 1691353
 Matrícula: 262987
 
-Este documento reúne o comportamento aprovado, os limites de arquitetura e o modelo de dados de referência para implementação. O [enunciado](<Atividade 01 - Descrição.pdf>) define os requisitos acadêmicos. O [AGENTS.md](../AGENTS.md) orienta o trabalho dos agentes. Os números abaixo correspondem às issues do projeto.
+Este documento reúne o comportamento aprovado, os limites de arquitetura e o modelo de dados de referência para implementação. O [enunciado](atividade-01-descricao.pdf) define os requisitos acadêmicos. O [AGENTS.md](../AGENTS.md) orienta o trabalho dos agentes. Os números abaixo correspondem às issues do projeto.
 
 ## Modelo de dados — #3, #15, #17 e #18
 

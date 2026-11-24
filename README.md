@@ -6,7 +6,7 @@ Matrícula: 262987
 
 Projeto da Atividade 01 de Orquestração de Workflows. Um DAG do Apache Airflow substitui o script agendado no cron: coleta o catálogo da [FakeStore API](https://fakestoreapi.com/docs), valida os produtos, calcula preço médio, mínimo, máximo e quantidade por categoria e publica o resultado no PostgreSQL sem duplicar dados ao reprocessar. Uma Web/API opcional lê as métricas e as mostra num painel.
 
-O foco da atividade é o pipeline. Esta página leva do clone a uma run concluída em poucos minutos e mostra onde cada requisito do [enunciado](<docs/Atividade 01 - Descrição.pdf>) está implementado.
+O foco da atividade é o pipeline. Esta página leva do clone a uma run concluída em poucos minutos e mostra onde cada requisito do [enunciado](docs/atividade-01-descricao.pdf) está implementado.
 
 ## Pré-requisitos
 
@@ -35,7 +35,7 @@ grep '^AIRFLOW_ADMIN_' .env   # usuário e senha da interface do Airflow
 docker compose up -d --build --wait
 ```
 
-O `db-init` aplica o esquema e cria as contas do banco. O `airflow-init` cria o usuário da interface e o pool `ecommerce_pool` com 2 slots. A Connection `shopbrasil_postgres` vem do `.env`. `docker compose ps -a` deve mostrar `db-init` e `airflow-init` com `Exited (0)` e os demais serviços `healthy`.
+O `db-init` aplica o esquema e cria as contas do banco. O `airflow-init` cria o usuário da interface e o pool `ecommerce_pool` com 2 slots. A Connection `shopbrasil_postgres` vem do `.env` por variável de ambiente e por isso não aparece em **Admin → Connections** ([detalhes](docs/ambiente-docker.md#connection-e-pool)). `docker compose ps -a` deve mostrar `db-init` e `airflow-init` com `Exited (0)` e os demais serviços `healthy`.
 
 **3. Ativar o DAG.** O DAG `shopbrasil_metricas` entra pausado. Ao despausá-lo, o Airflow cria uma run para a ocorrência das 06:00 de Brasília mais recente, que termina em menos de um minuto:
 
@@ -56,7 +56,7 @@ docker compose exec -e PGPASSWORD="$SHOPBRASIL_DB_READER_PASSWORD" postgres \
     FROM metricas_categoria m JOIN categoria c ON c.id = m.categoria_id ORDER BY 1, 2;"
 ```
 
-O [guia de execução](docs/execucao.md) continua daqui: run de uma data específica, reprocessamento da mesma run sem duplicatas, simulação de queda da API com retry e alerta, e a suíte E2E.
+O [guia de execução](docs/execucao.md) continua daqui: run de uma data específica, o que acontece ao executar o mesmo dia de novo, simulação de queda da API com retry e alerta, e a suíte E2E.
 
 ## Requisitos da atividade
 
@@ -78,7 +78,7 @@ O DAG fica em [pipeline/dags/shopbrasil_metricas.py](pipeline/dags/shopbrasil_me
 | Pool `ecommerce_pool` com 2 slots | `@task(pool="ecommerce_pool")` em `calcular_metricas`; o pool é criado pelo `airflow-init` | `airflow pools get ecommerce_pool` |
 | Pelo menos 2 TaskGroups | `preparacao`, `ingestao`, `analise` e `publicacao` | Visão Graph |
 | Persistência com `PostgresHook` e Connection | `infraestrutura/publicacao_postgres.py` usa `PostgresHook(postgres_conn_id="shopbrasil_postgres")` | Task `publicacao.publicar` |
-| Gravação idempotente | Numa só transação: categoria com `ON CONFLICT DO NOTHING`; snapshot do dia apagado e regravado, com `UNIQUE (data_referencia, categoria_id)`; histórico com `ON CONFLICT (run_id, categoria_id) DO NOTHING` | [Reprocessar a run](docs/execucao.md#5-reprocessar-a-própria-run) e contar as linhas |
+| Gravação idempotente | Numa só transação: categoria com `ON CONFLICT DO NOTHING`; snapshot do dia apagado e regravado, com `UNIQUE (data_referencia, categoria_id)`; histórico com `ON CONFLICT (run_id, categoria_id) DO NOTHING` | [Executar de novo o mesmo dia](docs/execucao.md#5-executar-de-novo-o-mesmo-dia): log `[SHOPBRASIL][PUBLICACAO]` e contagem das linhas |
 
 ### Opcionais (seção 4), todos implementados
 

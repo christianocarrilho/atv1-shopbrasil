@@ -13,10 +13,14 @@ do snapshot a categoria ausente da coleta sem tocar nas outras datas nem no cada
 Ponto de extensão da #18: ``etapas_adicionais`` recebe objetos ``EtapaTransacional`` que rodam
 com o mesmo cursor, depois do snapshot e antes do único commit. Uma exceção numa etapa desfaz
 cadastro e snapshot juntos.
+
+Depois do commit, uma linha ``[SHOPBRASIL][PUBLICACAO]`` informa quantas linhas do dia foram
+substituídas, para que o log da task mostre a idempotência sem consulta ao banco.
 """
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -28,6 +32,8 @@ from shopbrasil_pipeline.aplicacao.publicacao import ResultadoPublicacao
 from shopbrasil_pipeline.dominio.metricas import MetricasCategoria
 
 CONN_ID_PADRAO = "shopbrasil_postgres"
+
+log = logging.getLogger(__name__)
 
 # WITH ORDINALITY mantém a ordem da coleção na geração dos ids das categorias novas.
 _SQL_CADASTRAR = """
@@ -109,6 +115,7 @@ class PublicadorSnapshotPostgres:
                         raise RuntimeError(f"categorias sem id após o cadastro: {faltantes}")
 
                     cursor.execute(_SQL_APAGAR_DIA, (execucao.data_referencia,))
+                    substituidas = cursor.rowcount
                     # Decimal e date vão direto ao driver, que os envia como numeric e date.
                     cursor.executemany(
                         _SQL_INSERIR,
@@ -131,6 +138,15 @@ class PublicadorSnapshotPostgres:
         finally:
             conexao.close()
 
+        log.info(
+            "[SHOPBRASIL][PUBLICACAO] run=%s data=%s snapshot: %d linha(s) anterior(es) do dia "
+            "substituída(s) por %d; categoria(s) nova(s) no cadastro: %s",
+            execucao.run_id,
+            execucao.data_referencia.isoformat(),
+            substituidas,
+            len(codigos),
+            ", ".join(c for c in codigos if c in cadastrados) or "nenhuma",
+        )
         return ResultadoPublicacao(
             run_id=execucao.run_id,
             data_referencia=execucao.data_referencia,

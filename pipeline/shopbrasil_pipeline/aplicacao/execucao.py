@@ -41,13 +41,16 @@ class Execucao:
 def identificar_execucao(run_id: str, ocorrencia: datetime | None) -> Execucao:
     """Monta a identificação da run a partir da ocorrência agendada.
 
-    A data de referência não usa o relógio. Sem ocorrência, a run é rejeitada; o reprocessamento
-    é feito limpando as tasks da run original, que preserva ``run_id`` e ocorrência.
+    A data de referência não usa o relógio. Sem ocorrência, a run é rejeitada: o botão da interface
+    preenche a data lógica, mas ``airflow dags trigger`` sem ``--logical-date`` não, e adivinhar o dia
+    pelo relógio poderia gravar a data errada.
     """
     if not run_id:
         raise ValueError("run_id obrigatório")
     if ocorrencia is None:
         raise OcorrenciaAusenteError(
-            f"run {run_id!r} sem data lógica; reprocesse limpando as tasks da run agendada"
+            f"run {run_id!r} sem data lógica, então não há dia de referência para publicar; "
+            "dispare com --logical-date (o botão Acionar da interface já preenche) "
+            "ou reprocesse limpando as tasks de uma run existente"
         )
     return Execucao(run_id=run_id, data_referencia=data_referencia(ocorrencia))
