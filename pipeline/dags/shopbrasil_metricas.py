@@ -73,6 +73,22 @@ CALCULO_ATRASO_SEGUNDOS = float(os.environ.get("SHOPBRASIL_CALCULO_ATRASO_SEGUND
 
 log = logging.getLogger(__name__)
 
+# Valores de produção exigidos pelo enunciado; os ajustes por ambiente existem só para o E2E.
+BUSCA_RETRY_DELAY_PRODUCAO = timedelta(seconds=60)
+AVISO_AJUSTE_TESTE = "[SHOPBRASIL][AVISO] ajuste de teste ativo: %s; não use fora do E2E"
+
+
+def avisar_ajustes_de_teste() -> list[str]:
+    """Registra no log da task cada ajuste de teste ativo, para que não passe despercebido."""
+    ajustes = []
+    if BUSCA_RETRY_DELAY != BUSCA_RETRY_DELAY_PRODUCAO:
+        ajustes.append(f"SHOPBRASIL_BUSCA_RETRY_DELAY_SEGUNDOS={int(BUSCA_RETRY_DELAY.total_seconds())} (produção: 60)")
+    if CALCULO_ATRASO_SEGUNDOS:
+        ajustes.append(f"SHOPBRASIL_CALCULO_ATRASO_SEGUNDOS={CALCULO_ATRASO_SEGUNDOS:g} (produção: 0)")
+    for ajuste in ajustes:
+        log.warning(AVISO_AJUSTE_TESTE, ajuste)
+    return ajustes
+
 
 def _ocorrencia(contexto) -> OcorrenciaTask:
     """Traduz o contexto do callback do Airflow para a ocorrência da aplicação."""
@@ -149,6 +165,7 @@ def shopbrasil_metricas():
             on_failure_callback=busca_falha,
         )
         def buscar_produtos(execucao: dict[str, str]) -> dict[str, object]:
+            avisar_ajustes_de_teste()
             try:
                 fonte = composicao.fonte_catalogo()
             except ValueError as erro:

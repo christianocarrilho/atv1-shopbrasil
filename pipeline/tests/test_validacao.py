@@ -23,11 +23,11 @@ class ValidacaoTest(unittest.TestCase):
     def test_catalogo_valido_mantem_um_registro_por_produto_sem_arredondar(self):
         validos = validar_catalogo(catalogo(
             {"id": 1, "category": "electronics", "price": 64},
-            {"id": 2, "category": "electronics", "price": 10.005},
+            {"id": 2, "category": "electronics", "price": 10.50},
         ))
         self.assertEqual([p.para_xcom() for p in validos], [
             {"codigo_categoria": "electronics", "preco": "64"},
-            {"codigo_categoria": "electronics", "preco": "10.005"},
+            {"codigo_categoria": "electronics", "preco": "10.5"},
         ])
 
     def test_categoria_ausente_do_dia_e_normal(self):
@@ -68,6 +68,22 @@ class ValidacaoTest(unittest.TestCase):
             "produto 2: categoria em branco, preço do tipo boolean",
             "produto na posição 2: categoria do tipo ausente, preço do tipo ausente",
         ])
+
+
+    def test_rejeita_preco_fora_de_numeric_12_2(self):
+        for preco, motivo in ((10.005, "mais de duas casas"), (10000000000, "acima do limite")):
+            with self.subTest(preco=preco), self.assertRaisesRegex(CatalogoInvalidoError, motivo):
+                validar_catalogo(catalogo({"id": 1, "category": "x", "price": preco}))
+        # Zeros à direita não são casas a mais.
+        produto = projetar_catalogo([{"id": 1, "category": "x", "price": Decimal("10.500")}])
+        self.assertEqual("10.500", validar_catalogo(produto)[0].preco)
+
+    def test_rejeita_categoria_com_espacos_nas_extremidades(self):
+        for categoria in (" electronics", "electronics ", "\telectronics"):
+            with self.subTest(categoria=categoria), self.assertRaisesRegex(CatalogoInvalidoError, "espaços nas extremidades"):
+                validar_catalogo(catalogo({"id": 1, "category": categoria, "price": 1}))
+        # Espaço interno faz parte do código real da FakeStore.
+        self.assertEqual("men's clothing", validar_catalogo(catalogo({"id": 1, "category": "men's clothing", "price": 1}))[0].codigo_categoria)
 
 
 if __name__ == "__main__":

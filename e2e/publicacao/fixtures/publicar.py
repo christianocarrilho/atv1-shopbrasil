@@ -14,6 +14,7 @@ do commit. A última linha impressa é um JSON com o resultado.
 from __future__ import annotations
 
 import json
+import logging
 import sys
 
 from airflow.providers.postgres.hooks.postgres import PostgresHook
@@ -24,6 +25,12 @@ from shopbrasil_pipeline.composicao import publicar_snapshot
 from shopbrasil_pipeline.dominio.metricas import MetricasCategoria
 from shopbrasil_pipeline.infraestrutura.historico_postgres import RegistrarHistoricoPostgres
 from shopbrasil_pipeline.infraestrutura.publicacao_postgres import CONN_ID_PADRAO, PublicadorSnapshotPostgres
+
+# Avisos do pipeline (como a divergência do histórico, #18) vão ao stderr do driver, que o cenário
+# confere; o import do Airflow reconfigura o logging e eles não sairiam por padrão.
+_aviso = logging.StreamHandler(sys.stderr)
+_aviso.setLevel(logging.WARNING)
+logging.getLogger("shopbrasil_pipeline").addHandler(_aviso)
 
 
 class FalhaInjetada(RuntimeError):

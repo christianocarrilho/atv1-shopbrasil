@@ -27,6 +27,14 @@ def _duas_casas(valor: Decimal) -> Decimal:
     return valor.quantize(CENTAVOS, rounding=MODO_ARREDONDAMENTO)
 
 
+def _escala_exata(valor: Decimal) -> Decimal:
+    """Escala de duas casas sem mudar o valor; preço com mais casas está fora do contrato."""
+    escalado = _duas_casas(valor)
+    if escalado != valor:
+        raise ValueError(f"preço {valor} com mais de duas casas decimais")
+    return escalado
+
+
 def _decimal_finito(valor: object, campo: str) -> Decimal:
     # bool é subclasse de int e float perde precisão: os dois ficam fora do contrato.
     if not isinstance(valor, Decimal):
@@ -123,23 +131,33 @@ class MetricasCategoria:
 
 
 def _media_em_centavos(precos: tuple[Decimal, ...]) -> Decimal:
-    """Média exata (como fração) arredondada uma única vez para centavos, empate longe do zero."""
+    """Média exata (como fração) arredondada uma única vez para centavos com ``MODO_ARREDONDAMENTO``.
+
+    A fração pode não ter representação decimal finita, então o arredondamento separa a parte
+    inteira dos centavos do resto exato: resto abaixo ou acima de meio centavo decide sozinho, e só o
+    empate exato (resto = 1/2, sempre finito) é resolvido pelo ``Decimal`` com o modo configurado.
+    """
     centavos = sum((Fraction(p) for p in precos), Fraction(0)) * 100 / len(precos)
-    sinal = -1 if centavos < 0 else 1
-    inteiro = math.floor(abs(centavos) + Fraction(1, 2))
-    return Decimal(sinal * inteiro).scaleb(-2)
+    inteiro = math.floor(centavos)
+    resto = centavos - inteiro
+    if resto == Fraction(1, 2):
+        arredondado = (Decimal(inteiro) + Decimal("0.5")).quantize(Decimal(1), rounding=MODO_ARREDONDAMENTO)
+    else:
+        arredondado = Decimal(inteiro + (1 if resto > Fraction(1, 2) else 0))
+    return arredondado.scaleb(-2)
 
 
 def calcular_metricas(entrada: PrecosCategoria) -> MetricasCategoria:
     """Calcula as quatro métricas de uma categoria.
 
     A média é exata até o único arredondamento para duas casas. Mínimo e máximo são preços
-    observados e só recebem a escala de duas casas da coluna ``numeric(12,2)``.
+    observados, sem arredondamento: a validação (#6) só aceita preços com até duas casas, e aqui
+    eles apenas recebem a escala fixa da coluna ``numeric(12,2)``.
     """
     return MetricasCategoria(
         codigo_categoria=entrada.codigo_categoria,
         preco_medio=_media_em_centavos(entrada.precos),
-        preco_minimo=_duas_casas(min(entrada.precos)),
-        preco_maximo=_duas_casas(max(entrada.precos)),
+        preco_minimo=_escala_exata(min(entrada.precos)),
+        preco_maximo=_escala_exata(max(entrada.precos)),
         quantidade_produtos=len(entrada.precos),
     )
