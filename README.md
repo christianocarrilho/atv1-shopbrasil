@@ -56,7 +56,7 @@ docker compose exec -e PGPASSWORD="$SHOPBRASIL_DB_READER_PASSWORD" postgres \
     FROM metricas_categoria m JOIN categoria c ON c.id = m.categoria_id ORDER BY 1, 2;"
 ```
 
-O [guia de execução](docs/execucao.md) continua daqui: run de uma data específica, reprocessamento da mesma run sem duplicatas, simulação de queda da API com retry e alerta, e a suíte E2E.
+O [guia de execução](docs/execucao.md) continua daqui: run de uma data específica, o que acontece ao executar o mesmo dia de novo, simulação de queda da API com retry e alerta, e a suíte E2E.
 
 ## Requisitos da atividade
 
@@ -78,7 +78,7 @@ O DAG fica em [pipeline/dags/shopbrasil_metricas.py](pipeline/dags/shopbrasil_me
 | Pool `ecommerce_pool` com 2 slots | `@task(pool="ecommerce_pool")` em `calcular_metricas`; o pool é criado pelo `airflow-init` | `airflow pools get ecommerce_pool` |
 | Pelo menos 2 TaskGroups | `preparacao`, `ingestao`, `analise` e `publicacao` | Visão Graph |
 | Persistência com `PostgresHook` e Connection | `infraestrutura/publicacao_postgres.py` usa `PostgresHook(postgres_conn_id="shopbrasil_postgres")` | Task `publicacao.publicar` |
-| Gravação idempotente | Numa só transação: categoria com `ON CONFLICT DO NOTHING`; snapshot do dia apagado e regravado, com `UNIQUE (data_referencia, categoria_id)`; histórico com `ON CONFLICT (run_id, categoria_id) DO NOTHING` | [Reprocessar a run](docs/execucao.md#5-reprocessar-a-própria-run) e contar as linhas |
+| Gravação idempotente | Numa só transação: categoria com `ON CONFLICT DO NOTHING`; snapshot do dia apagado e regravado, com `UNIQUE (data_referencia, categoria_id)`; histórico com `ON CONFLICT (run_id, categoria_id) DO NOTHING` | [Executar de novo o mesmo dia](docs/execucao.md#5-executar-de-novo-o-mesmo-dia): log `[SHOPBRASIL][PUBLICACAO]` e contagem das linhas |
 
 ### Opcionais (seção 4), todos implementados
 

@@ -49,8 +49,12 @@ class SnapshotFalso:
 
 
 class CursorFalso:
-    def __init__(self, falhar_em: str | None = None, historico_da_run: list[tuple] | None = None) -> None:
+    def __init__(
+        self, falhar_em: str | None = None, historico_da_run: list[tuple] | None = None, linhas_do_dia: int = 0
+    ) -> None:
         self.comandos: list[tuple[str, object]] = []
+        self.rowcount = -1
+        self._linhas_do_dia = linhas_do_dia
         self.historico_da_run = historico_da_run or []
         self._falhar_em = falhar_em
         self._resultado: list[tuple] = []
@@ -74,6 +78,8 @@ class CursorFalso:
             self._resultado = [(c, i) for i, c in enumerate(parametros[0], start=1)]
         elif "FROM public.metricas_categoria_historico" in sql:
             self._resultado = list(self.historico_da_run)
+        elif sql.startswith("DELETE"):
+            self.rowcount = self._linhas_do_dia
 
     def executemany(self, sql, linhas):
         self._registrar(sql, list(linhas))
@@ -109,7 +115,8 @@ class RegistrarHistoricoTest(unittest.TestCase):
         cursor = CursorFalso()
         RegistrarHistoricoPostgres()(cursor, SnapshotFalso(EXECUCAO, METRICAS, {"electronics": 7, "jewelery": 9}))
         self.assertEqual(len(cursor.comandos), 2)
-        sql, linhas = cursor.comandos[0]
+        self.assertIn("SELECT", cursor.comandos[0][0])  # leitura do que a run já tem, antes do INSERT
+        sql, linhas = cursor.comandos[1]
         self.assertIn("INSERT INTO public.metricas_categoria_historico", sql)
         self.assertIn("ON CONFLICT (run_id, categoria_id) DO NOTHING", sql)
         self.assertNotIn("DO UPDATE", sql)
@@ -124,7 +131,7 @@ class RegistrarHistoricoTest(unittest.TestCase):
     def test_valores_sao_os_mesmos_objetos_decimal_publicados(self):
         cursor = CursorFalso()
         RegistrarHistoricoPostgres()(cursor, SnapshotFalso(EXECUCAO, METRICAS[:1], {"electronics": 1}))
-        linha = cursor.comandos[0][1][0]
+        linha = cursor.comandos[1][1][0]
         self.assertIs(linha[3], METRICAS[0].preco_medio)
         self.assertIsInstance(linha[3], Decimal)
 
@@ -152,7 +159,21 @@ class RegistrarHistoricoTest(unittest.TestCase):
         self.assertEqual(["electronics"], divergentes)
         self.assertIn("categoria=electronics histórico=20.00/15.00/25.00/2 snapshot=10.00/10.00/10.01/3", logs.output[0])
         # A linha original não é atualizada: o INSERT segue com DO NOTHING.
-        self.assertNotIn("DO UPDATE", cursor.comandos[0][0])
+        self.assertNotIn("DO UPDATE", cursor.comandos[1][0])
+
+    def test_log_conta_linhas_gravadas_numa_run_nova(self):
+        cursor = CursorFalso()
+        with self.assertLogs("shopbrasil_pipeline.infraestrutura.historico_postgres", "INFO") as logs:
+            RegistrarHistoricoPostgres()(cursor, SnapshotFalso(EXECUCAO, METRICAS, {"electronics": 7, "jewelery": 9}))
+        self.assertIn(f"[SHOPBRASIL][HISTORICO] run={EXECUCAO.run_id}: 2 linha(s) gravada(s), 0 já registrada(s)", logs.output[0])
+
+    def test_log_conta_linhas_preservadas_no_reprocessamento(self):
+        iguais = [(7, Decimal("10.00"), Decimal("10.00"), Decimal("10.01"), 3),
+                  (9, Decimal("10.01"), Decimal("10.00"), Decimal("10.01"), 2)]
+        cursor = CursorFalso(historico_da_run=iguais)
+        with self.assertLogs("shopbrasil_pipeline.infraestrutura.historico_postgres", "INFO") as logs:
+            RegistrarHistoricoPostgres()(cursor, SnapshotFalso(EXECUCAO, METRICAS, {"electronics": 7, "jewelery": 9}))
+        self.assertIn("0 linha(s) gravada(s), 2 já registrada(s) preservada(s)", logs.output[0])
 
 
 class PublicacaoComHistoricoTest(unittest.TestCase):
@@ -188,12 +209,23 @@ class PublicacaoComHistoricoTest(unittest.TestCase):
                 "SELECT id",
                 "DELETE public.metricas_categoria",
                 "INSERT public.metricas_categoria",
+                "SELECT preco_medio,",  # o que a run já tem no histórico, antes do INSERT
                 "INSERT public.metricas_categoria_historico",
-                "SELECT preco_medio,",  # leitura do histórico da run para o aviso de divergência
             ],
         )
         self.assertFalse(conexao.autocommit)
         self.assertEqual(conexao.desfecho, "commit")
+
+    def test_log_da_publicacao_informa_linhas_substituidas_depois_do_commit(self):
+        cursor = CursorFalso(linhas_do_dia=4)
+        with self.assertLogs("shopbrasil_pipeline.infraestrutura.publicacao_postgres", "INFO") as logs:
+            conexao = self._publicar(cursor)
+        self.assertEqual(conexao.desfecho, "commit")
+        self.assertIn(
+            f"[SHOPBRASIL][PUBLICACAO] run={EXECUCAO.run_id} data=2026-11-21 snapshot: 4 linha(s) anterior(es) "
+            "do dia substituída(s) por 2; categoria(s) nova(s) no cadastro: electronics, jewelery",
+            logs.output[0],
+        )
 
     def test_falha_no_historico_reverte_a_publicacao(self):
         cursor = CursorFalso(falhar_em="metricas_categoria_historico")
@@ -201,8 +233,9 @@ class PublicacaoComHistoricoTest(unittest.TestCase):
         publicador = self.modulo.PublicadorSnapshotPostgres(
             etapas_adicionais=(RegistrarHistoricoPostgres(),), abrir_conexao=lambda: conexao
         )
-        with self.assertRaisesRegex(RuntimeError, "falha simulada"):
-            publicador.publicar_snapshot(EXECUCAO, METRICAS)
+        with self.assertNoLogs("shopbrasil_pipeline.infraestrutura.publicacao_postgres", "INFO"):
+            with self.assertRaisesRegex(RuntimeError, "falha simulada"):
+                publicador.publicar_snapshot(EXECUCAO, METRICAS)
         self.assertEqual(conexao.desfecho, "rollback")
         self.assertTrue(conexao.fechada)
 

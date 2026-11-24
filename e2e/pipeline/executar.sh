@@ -115,8 +115,9 @@ SELECT (SELECT count(*) FROM dag_run WHERE dag_id = '$DAG_ID' AND logical_date =
        count(DISTINCT task_id), count(*) FILTER (WHERE try_number = 2 AND state = 'success')
 FROM task_instance WHERE dag_id = '$DAG_ID' AND run_id = '$RUN_ID'")"
 
-# P6. Run sem data lógica é rejeitada em vez de usar o relógio. A CLI e a UI sempre preenchem a
-# data lógica, então o cenário usa trigger_dag do Airflow 3.4.0 (API interna, fixada pela #1).
+# P6. Run sem data lógica é rejeitada em vez de usar o relógio. O botão Acionar da UI preenche a data
+# lógica; `airflow dags trigger` sem --logical-date não. O cenário usa trigger_dag do Airflow 3.4.0
+# (API interna, fixada pela #1) para criar a run sem data lógica de forma determinística.
 SEM_DATA="e2e__sem_data_logica"
 dc exec -T -e PYTHONPATH=/opt/airflow/pipeline:/opt/airflow/dags airflow-scheduler python - "$SEM_DATA" <<'PY' >"$LOG_DIR/sem-data.log" 2>&1
 import sys
