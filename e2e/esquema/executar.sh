@@ -172,7 +172,7 @@ metricas_categoria_historico.quantidade_produtos:integer:not null
 metricas_categoria_historico.publicado_em:timestamp with time zone:null"
 colunas_antes="$(admin_sql "$COLUNAS_SQL")"
 verificar "E2 colunas e tipos" "$COLUNAS_ESPERADAS" "$colunas_antes" \
-  "$(wc -l <<<"$colunas_antes" | tr -d ' ') colunas; ids identity ALWAYS; preços numeric(12,2); quantidade integer; datas date; todas NOT NULL"
+  "$(wc -l <<<"$colunas_antes" | tr -d ' ') colunas; ids identity ALWAYS; preços numeric(12,2); quantidade integer; datas de referência date; publicado_em timestamptz anulável"
 
 # E3. Chaves primárias, unicidade e FKs declaradas.
 RESTRICOES_ESPERADAS="categoria categoria_codigo_uk UNIQUE (codigo)
