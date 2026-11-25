@@ -153,5 +153,5 @@ Executa todos os cenários em projetos Compose isolados, com dados próprios e F
 
 Passos finais, registrados aqui só depois de confirmados pelo autor:
 
-- [ ] Acesso de leitura ao repositório conferido para o avaliador.
-- [ ] Link do repositório e de [evidencias.md](evidencias.md) postado no canal de entrega da atividade.
+- [x] Acesso de leitura ao repositório conferido para o avaliador: repositório público, conferido em 25 nov. 2026.
+- [x] Link do repositório e de [evidencias.md](evidencias.md) postado no canal de entrega da atividade em 25 nov. 2026, confirmado pelo autor.
