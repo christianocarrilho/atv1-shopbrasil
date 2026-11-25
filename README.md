@@ -47,7 +47,7 @@ docker compose run --rm --no-deps -T --entrypoint sh db-init -c '
     FROM metricas_categoria m JOIN categoria c ON c.id = m.categoria_id ORDER BY 1, 2;"
 ```
 
-O [guia de execução](docs/execucao.md) continua daqui: run de uma data específica, o que acontece ao executar o mesmo dia de novo, simulação de queda da API com retry e alerta, e a suíte E2E.
+O [guia de execução](docs/execucao.md) continua daqui: run de uma data específica, o que acontece ao executar o mesmo dia de novo, simulação de queda da API para acionar retry, callbacks e alerta, e a suíte E2E.
 
 ## Requisitos da atividade
 
@@ -64,7 +64,7 @@ O DAG fica em [pipeline/dags/shopbrasil_metricas.py](pipeline/dags/shopbrasil_me
 | 06:00 em America/Sao_Paulo, `pendulum`, `start_date`, `catchup=False` | `CronTriggerTimetable("0 6 * * *", timezone="America/Sao_Paulo")` e `START_DATE = pendulum.datetime(2026, 11, 1, tz=...)` | `airflow dags details shopbrasil_metricas` |
 | Buscar Produtos com retry e backoff exponencial | `retries=3`, `retry_delay` de 60 s e `retry_exponential_backoff=2.0` | [Simular queda da API](docs/execucao.md#6-simular-queda-da-api) |
 | `try`/`except` + `raise` | Corpo de `buscar_produtos`: registra o erro e relança para acionar o retry | Log da tentativa com falha |
-| Callbacks de sucesso, retry e falha na task crítica | `on_success_callback`, `on_retry_callback` e `on_failure_callback` em `buscar_produtos` | Linhas `[SHOPBRASIL][SUCESSO]`, `[RETRY]` e `[FALHA]` no log |
+| Callbacks de sucesso, retry e falha na task crítica | `on_success_callback`, `on_retry_callback` e `on_failure_callback` em `buscar_produtos` | Linhas `[SHOPBRASIL][SUCESSO]`, `[RETRY]` e `[FALHA]` no log; [Simular queda da API](docs/execucao.md#6-simular-queda-da-api) |
 | Dynamic Task Mapping | `calcular_metricas.expand(entrada=grupos)`, sobre as categorias encontradas na coleta, sem lista fixa | Uma instância mapeada por categoria |
 | Pool `ecommerce_pool` com 2 slots | `@task(pool="ecommerce_pool")` em `calcular_metricas`; o pool é criado pelo `airflow-init` | `airflow pools get ecommerce_pool` |
 | Pelo menos 2 TaskGroups | `preparacao`, `ingestao`, `analise` e `publicacao` | Visão Graph |
