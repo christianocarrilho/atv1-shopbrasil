@@ -100,3 +100,7 @@ python3 qualidade/lint_arquitetura.py                        # limites entre as 
 ```
 
 Para encerrar, `docker compose down` mantém os dados e `docker compose down -v` apaga os volumes.
+
+## Desenvolvimento
+
+Conduzi o projeto no papel de tech lead descrito no enunciado, com agentes de IA como time de implementação. Defini a arquitetura, as convenções e o fluxo de trabalho em [AGENTS.md](AGENTS.md) e na [especificação](docs/especificacao.md), organizei o backlog nas issues, tomei as decisões técnicas, revisei e integrei cada PR e validei a entrega. Claude (Anthropic, via Claude Code) e Kiro implementaram e fizeram a revisão cruzada sob essa supervisão; os commits com coautoria registram essa participação.
