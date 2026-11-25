@@ -162,7 +162,7 @@ r = json.load(sys.stdin)
 num = lambda v: "None" if v is None else ("%g" % v)
 print("|".join([
     r["chartjs"],
-    ",".join(r["tabela_preco_medio"]),
+    ";".join(r["tabela_preco_medio"]),
     ",".join(num(v) for v in r["barras"]["valores"]) + "@" + str(r["barras"]["desenhado"]),
     r["vazio_url"] + ";" + r["vazio_texto"] + ";" + r["vazio_barras"] + ";" + str(r["vazio_tem_grafico_barras"]),
     ",".join(num(v) for v in r["linha"]["valores"]) + "@" + str(r["linha"]["desenhado"]),

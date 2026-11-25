@@ -110,9 +110,9 @@ PY
 
 # P. Página do painel (#19): abre na última data, filtro por data, estado vazio, mesmos valores da API.
 verificar "P2 painel abre na data mais recente" \
-  "2026-11-24|2026-11-24||Joias/1234567890.12/0.10/9999999999.99/4|$(json_ordenado '/api/metricas?data=2026-11-24')" "$(pagina)"
+  "2026-11-24|2026-11-24||Joias/R\$ 1.234.567.890,12/R\$ 0,10/R\$ 9.999.999.999,99/4|$(json_ordenado '/api/metricas?data=2026-11-24')" "$(pagina)"
 verificar "P3 selecionar data carrega o dia" \
-  "2026-11-22|2026-11-22||Eletrônicos/10.00/10.00/10.01/3;Joias/10.01/10.00/10.01/2|$(json_ordenado '/api/metricas?data=2026-11-22')" \
+  "2026-11-22|2026-11-22||Eletrônicos/R\$ 10,00/R\$ 10,00/R\$ 10,01/3;Joias/R\$ 10,01/R\$ 10,00/R\$ 10,01/2|$(json_ordenado '/api/metricas?data=2026-11-22')" \
   "$(pagina '?data=2026-11-22')"
 verificar "P4 data sem registros" \
   '2026-11-21|2026-11-21|Sem métricas para esta data||{"data":"2026-11-21","metricas":[],"vazia":true}' \
@@ -147,7 +147,7 @@ verificar "E4 categoria desconhecida vira aviso" "null|Categoria 'toys' não cad
 # G. Navegador real (#23): Chart.js desenha as barras com os preços da tabela; a troca de data no
 # campo leva ao estado vazio; os filtros da evolução desenham a linha com lacunas (null, spanGaps false).
 verificar "G1 painel no Chromium: barras, troca de data, linha e console" \
-  "4.6.1|10.00,10.01|10,10.01@2|data=2026-11-21;Sem métricas para esta data;Sem métricas para esta data;False|20,None,10,None@4|spanGaps=False|erros=0" \
+  "4.6.1|R\$ 10,00;R\$ 10,01|10,10.01@2|data=2026-11-21;Sem métricas para esta data;Sem métricas para esta data;False|20,None,10,None@4|spanGaps=False|erros=0" \
   "$(navegador_painel 2026-11-22 2026-11-21 electronics 2026-11-20 2026-11-23)"
 
 resumo

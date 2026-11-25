@@ -50,9 +50,9 @@
             {% for m in metricas.metricas %}
             <tr data-categoria="{{ m.categoria.codigo }}">
               <td>{{ m.categoria.descricao }}</td>
-              <td class="num">{{ m.preco_medio }}</td>
-              <td class="num">{{ m.preco_minimo }}</td>
-              <td class="num">{{ m.preco_maximo }}</td>
+              <td class="num">{{ m.preco_medio | reais }}</td>
+              <td class="num">{{ m.preco_minimo | reais }}</td>
+              <td class="num">{{ m.preco_maximo | reais }}</td>
               <td class="num">{{ m.quantidade_produtos }}</td>
             </tr>
             {% endfor %}
@@ -103,6 +103,9 @@
 
   <script src="/estaticos/chart.umd.min.js"></script>
   <script>
+    const moeda = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+    const formatarReais = valor => moeda.format(valor);
+
     // Barras (#20): uma por linha da tabela, com o mesmo preço médio publicado.
     (function () {
       const canvas = document.getElementById("grafico-barras");
@@ -122,9 +125,9 @@
           maintainAspectRatio: false,
           plugins: {
             legend: { display: false },
-            tooltip: { callbacks: { label: ctx => "Preço médio: " + dados.metricas[ctx.dataIndex].preco_medio } }
+            tooltip: { callbacks: { label: ctx => "Preço médio: " + formatarReais(dados.metricas[ctx.dataIndex].preco_medio) } }
           },
-          scales: { y: { beginAtZero: true } }
+          scales: { y: { beginAtZero: true, ticks: { callback: formatarReais } } }
         }
       });
     })();
@@ -149,8 +152,9 @@
         options: {
           maintainAspectRatio: false,
           plugins: {
-            tooltip: { callbacks: { label: ctx => "Preço médio: " + serie.pontos[ctx.dataIndex].preco_medio } }
-          }
+            tooltip: { callbacks: { label: ctx => "Preço médio: " + formatarReais(serie.pontos[ctx.dataIndex].preco_medio) } }
+          },
+          scales: { y: { ticks: { callback: formatarReais } } }
         }
       });
     })();

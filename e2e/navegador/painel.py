@@ -19,11 +19,20 @@ from playwright.sync_api import sync_playwright
 
 base, data, data_vazia, categoria, inicio, fim = sys.argv[1:7]
 
-LER_GRAFICO = """id => {
+LER_GRAFICO = r"""id => {
   const c = document.getElementById(id);
   const g = c && window.Chart && Chart.getChart(c);
   if (!g) return null;
   const d = g.data.datasets[0];
+  const indice = d.data.findIndex(valor => valor !== null);
+  const eixo = g.options.scales.y.ticks.callback(1234.56).replace(/\s/g, " ");
+  if (eixo !== "R$ 1.234,56") throw new Error("Eixo monetário inválido: " + eixo);
+  if (indice >= 0) {
+    const tooltip = g.options.plugins.tooltip.callbacks.label({dataIndex: indice});
+    if (!/^Preço médio: R\$\s[\d.]+,\d{2}$/.test(tooltip)) {
+      throw new Error("Tooltip monetário inválido: " + tooltip);
+    }
+  }
   return {tipo: g.config.type, rotulos: g.data.labels, valores: d.data, spanGaps: d.spanGaps === true,
           desenhado: g.getDatasetMeta(0).data.length};
 }"""

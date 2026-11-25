@@ -6,7 +6,7 @@ Matrícula: 262987
 
 Rota ``GET /`` renderizada no servidor com Jinja2. Recebe ``data`` (AAAA-MM-DD) e, sem ela, abre na
 data mais recente com métricas. Usa os mesmos casos de uso e modelos HTTP da API JSON, por isso a
-tabela mostra exatamente os valores do contrato da #9 (strings decimais, sem float). A coleção
+tabela exibe em reais os valores do contrato da #9, com formatação decimal exata. A coleção
 carregada vai também embutida como JSON (``#metricas-dados``) para as barras da #20, e a seção
 ``#evolucao`` traz a linha da #21: filtros ``categoria``, ``inicio`` e ``fim`` no mesmo formulário,
 com padrão na primeira categoria cadastrada e nos 30 dias que terminam na data selecionada. A série
@@ -18,6 +18,7 @@ Sem SQL: os casos de uso chegam da composição.
 from __future__ import annotations
 
 from datetime import date, timedelta
+from decimal import Decimal
 from pathlib import Path
 from typing import Annotated
 
@@ -35,9 +36,16 @@ SEM_PUBLICACAO = "Nenhuma métrica publicada até o momento"
 DIAS_PADRAO_EVOLUCAO = 30
 
 
+def formatar_reais(valor: str) -> str:
+    """Formata o preço em pt-BR com duas casas, sem conversão para float."""
+    numero = f"{Decimal(valor):,.2f}".translate(str.maketrans(",.", ".,"))
+    return f"R$ {numero}"
+
+
 def criar_roteador_pagina(casos: CasosDeUso) -> APIRouter:
     roteador = APIRouter(include_in_schema=False)
     templates = Jinja2Templates(directory=PASTA_TEMPLATES)
+    templates.env.filters["reais"] = formatar_reais
 
     def evolucao(categorias, categoria: str | None, inicio: str | None, fim: str | None,
                  selecionada: date | None) -> dict[str, object]:
