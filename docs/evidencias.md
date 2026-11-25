@@ -482,3 +482,21 @@ Em 24 nov. 2026, as seis partes da suíte foram executadas em projetos Docker de
 | M7 — `Clear` com catálogo alterado | Mesma run e segunda publicação bem-sucedida. O snapshot mudou. Valores e instantes das linhas históricas originais foram preservados. `jewelery` e `toys` receberam novas linhas com instante real, e o log registrou a divergência das métricas |
 
 O lint de arquitetura aprovou 49 arquivos. Passaram 81 testes do pipeline no host, 4 do operador na imagem do Airflow, 39 do lint e 48 da Web/API. A revisão cruzada com Claude Opus e Kiro levou ao ajuste do timeout de prontidão, à comprovação da troca de snapshot com catálogo diferente e à cobertura de `Clear` no DAG real. A revisão final também pediu a confirmação do motivo da rejeição do instante lógico, aprovada no N8.
+
+## Conferência final e entrega — #12
+
+Em 25 nov. 2026, um clone novo de `main` 27bde3e foi conferido seguindo o README e o [guia de execução](execucao.md), com os blocos de comando copiados dos próprios documentos e a FakeStore real.
+
+| Etapa | Resultado observado |
+|---|---|
+| `docker compose up -d --build --wait`, sem `.env` | Todos os serviços `healthy`; nenhum erro de importação do DAG |
+| Despausar o DAG | Run agendada de 25/11 `success`; 4 categorias no snapshot |
+| Painel e login de demonstração | Painel com HTTP 200; `POST /auth/token` com HTTP 201 |
+| Duas runs manuais de 21/11 e Clear da primeira | Snapshot de 21/11 com 4 linhas; histórico com 4 linhas por run; logs `[PUBLICACAO]` e `[HISTORICO]` iguais aos da seção 5 do guia |
+| Trigger sem data lógica | `[SHOPBRASIL][FALHA]` com `OcorrenciaAusenteError` e `[SHOPBRASIL][FALHA RUN]` |
+| Queda da API (seção 6 do guia) | Run `failed` após 8 min 21 s: `[RETRY]` 1/4 a 3/4, `[FALHA]` e `[ALERTA SIMULADO]` em 4/4, `[FALHA RUN]`; tasks seguintes `upstream_failed`; snapshot e histórico intactos |
+| Testes unitários e lint | OK; `OK: 49 arquivo(s)` |
+| `e2e/executar_todos.sh` | **267 PASS, 0 FAIL**: ambiente 31, esquema 38, pipeline 77, publicacao 48, web 35, integrado 38 |
+
+Entrega: o repositório é público, e o autor postou no canal da atividade, em 25 nov. 2026, o link do repositório e o deste documento.
+
