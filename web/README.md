@@ -19,7 +19,7 @@ O pacote não importa `pipeline/`: o contrato entre os módulos é o esquema em 
 
 ## Contrato HTTP — para as #19–#21
 
-Base: `http://localhost:${SHOPBRASIL_WEB_PORT}` (padrão 8098, só em 127.0.0.1). A documentação OpenAPI gerada fica em `/docs` e `/openapi.json`.
+Base: `http://localhost:${SHOPBRASIL_WEB_PORT}` (padrão 9880, só em 127.0.0.1). A documentação OpenAPI gerada fica em `/docs` e `/openapi.json`.
 
 Convenções:
 
@@ -81,6 +81,8 @@ Série do preço médio da categoria no intervalo **inclusivo** `[inicio, fim]`,
 
 ## Painel — #19, #20 e #21
 
+A tabela, os eixos de preço e as dicas dos gráficos exibem preços em reais no padrão brasileiro, como `R$ 1.234,56`.
+
 `GET /` renderiza o painel no servidor com Jinja2, usando os mesmos casos de uso e modelos HTTP da API.
 
 - Sem `data`, abre na data mais recente com métricas (`ultima-data`). Selecionar outra data no campo recarrega a página com `?data=AAAA-MM-DD`.
@@ -97,7 +99,7 @@ O serviço `web` do [docker-compose.yml](../docker-compose.yml) é construído d
 
 ```sh
 docker compose up -d --build --wait web                     # postgres → db-init → web
-curl -s http://localhost:8098/api/metricas/ultima-data
+curl -s http://localhost:9880/api/metricas/ultima-data
 docker compose run --rm --no-deps web python -m unittest discover -s tests -t .
 ```
 

@@ -52,7 +52,17 @@ api_do_dia() {
 painel_do_dia() {
   # Tabela do painel no mesmo formato; a descrição publicada pelo DAG é o próprio código.
   curl -sS --max-time 10 "$BASE/?data=$1" | python3 "$ROOT/e2e/web/fixtures/pagina.py" | cut -d'|' -f4 \
-    | python3 -c 'import sys; l=sys.stdin.read().strip(); print(";".join(r.split("/",1)[0] + "=" + r.split("/",1)[1] for r in l.split(";")) if l else "")'
+    | python3 -c '
+import sys
+
+def normalizar_linha(linha):
+    categoria, *precos, quantidade = linha.split("/")
+    decimais = [preco.removeprefix("R$ ").replace(".", "").replace(",", ".") for preco in precos]
+    return categoria + "=" + "/".join([*decimais, quantidade])
+
+tabela = sys.stdin.read().strip()
+print(";".join(map(normalizar_linha, tabela.split(";"))) if tabela else "")
+'
 }
 evolucao() {
   # evolucao <código URL> <início> <fim>: "data=preço" por dia, None nos dias sem observação.
@@ -167,7 +177,7 @@ verificar "N6 dados (valores e xmin) e painel preservados" "$ESTADO_ANTES_N6|$DA
 # N7. Painel num Chromium real sobre os dados publicados pelo DAG: barras de 11/11 iguais à tabela
 # (com toys), troca de data para um dia sem publicação e linha de toys com lacunas nos outros dias.
 verificar "N7 painel no Chromium com dados do DAG" \
-  "4.6.1|86.50,695.00,66.13,67.76,9.85|86.5,695,66.13,67.76,9.85@5|data=2026-11-09;Sem métricas para esta data;Sem métricas para esta data;False|None,None,67.76,None,None@5|spanGaps=False|erros=0" \
+  "4.6.1|R\$ 86,50;R\$ 695,00;R\$ 66,13;R\$ 67,76;R\$ 9,85|86.5,695,66.13,67.76,9.85@5|data=2026-11-09;Sem métricas para esta data;Sem métricas para esta data;False|None,None,67.76,None,None@5|spanGaps=False|erros=0" \
   "$(navegador_painel 2026-11-11 2026-11-09 toys 2026-11-09 2026-11-13)"
 
 

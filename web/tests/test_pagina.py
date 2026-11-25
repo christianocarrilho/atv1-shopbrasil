@@ -92,14 +92,14 @@ class PaginaTest(unittest.TestCase):
         self.assertIn('value="2026-11-22"', pagina)
         self.assertIn('<span id="data-selecionada">2026-11-22</span>', pagina)
         self.assertEqual([
-            ["electronics", "10.00", "10.00", "10.01", "3"],
-            ["jewelery", "10.01", "10.00", "10.01", "2"],
+            ["electronics", "R$ 10,00", "R$ 10,00", "R$ 10,01", "3"],
+            ["jewelery", "R$ 10,01", "R$ 10,00", "R$ 10,01", "2"],
         ], linhas_da_tabela(pagina))
 
     def test_selecionar_data_carrega_o_dia(self) -> None:
         _, _, pagina = obter(self.app, "/", data="2026-11-20")
         self.assertIn('value="2026-11-20"', pagina)
-        self.assertEqual([["electronics", "20.00", "15.00", "25.00", "2"]], linhas_da_tabela(pagina))
+        self.assertEqual([["electronics", "R$ 20,00", "R$ 15,00", "R$ 25,00", "2"]], linhas_da_tabela(pagina))
         self.assertNotIn("Sem métricas para esta data", pagina)
 
     def test_data_sem_registros(self) -> None:
@@ -141,7 +141,8 @@ class PaginaTest(unittest.TestCase):
         dados = dados_embutidos(pagina)
         # Cada barra vem de uma linha da coleção; o preço médio é o mesmo exibido na tabela.
         self.assertEqual(
-            [linha[1] for linha in linhas_da_tabela(pagina)],
+            [linha[1].removeprefix("R$ ").replace(".", "").replace(",", ".")
+             for linha in linhas_da_tabela(pagina)],
             [m["preco_medio"] for m in dados["metricas"]],
         )
         self.assertNotIn('id="barras-vazio"', pagina)
@@ -184,7 +185,7 @@ class PaginaTest(unittest.TestCase):
     def test_evolucao_mantem_data_e_filtros_independentes(self) -> None:
         _, _, pagina = obter(self.app, "/", data="2026-11-20", categoria="jewelery",
                              inicio="2026-11-21", fim="2026-11-22")
-        self.assertEqual([["electronics", "20.00", "15.00", "25.00", "2"]], linhas_da_tabela(pagina))
+        self.assertEqual([["electronics", "R$ 20,00", "R$ 15,00", "R$ 25,00", "2"]], linhas_da_tabela(pagina))
         serie = dados_embutidos(pagina, "evolucao-dados")
         self.assertEqual(["2026-11-21", "2026-11-22"], [p["data"] for p in serie["pontos"]])
         self.assertIn('<option value="jewelery" selected>', pagina)

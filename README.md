@@ -12,7 +12,7 @@ O foco da atividade é o pipeline. Esta página leva do clone a uma run concluí
 
 - Docker com Compose v2 (Docker Desktop ou Docker Engine) e cerca de 4 GB de memória livres para os contêineres.
 - Acesso à internet, para baixar as imagens e consultar a FakeStore.
-- Portas 8099 (Airflow) e 8098 (painel) livres em 127.0.0.1. Se estiverem ocupadas, troque `AIRFLOW_API_PORT` e `SHOPBRASIL_WEB_PORT` no `.env`.
+- Portas 9980 (Airflow) e 9880 (painel) livres em 127.0.0.1. Se estiverem ocupadas, troque `AIRFLOW_API_PORT` e `SHOPBRASIL_WEB_PORT` no `.env`.
 
 ## Início rápido
 
@@ -33,9 +33,9 @@ docker compose exec airflow-scheduler airflow dags unpause shopbrasil_metricas
 docker compose exec airflow-scheduler airflow dags list-runs shopbrasil_metricas
 ```
 
-Na interface, em http://localhost:8099 com o login de demonstração, abra o DAG e use a visão **Graph** para ver os TaskGroups `preparacao`, `ingestao`, `analise` e `publicacao`, o fan-out de `calcular_metricas` (uma instância por categoria) e o fan-in em `consolidar`.
+Na interface, em http://localhost:9980 com o login de demonstração, abra o DAG e use a visão **Graph** para ver os TaskGroups `preparacao`, `ingestao`, `analise` e `publicacao`, o fan-out de `calcular_metricas` (uma instância por categoria) e o fan-in em `consolidar`.
 
-**3. Conferir o resultado.** O painel em http://localhost:8098 abre na data mais recente com métricas. As tabelas podem ser consultadas com a conta de leitura, que é a mesma usada pela web:
+**3. Conferir o resultado.** O painel em http://localhost:9880 abre na data mais recente com métricas. As tabelas podem ser consultadas com a conta de leitura, que é a mesma usada pela web:
 
 ```sh
 docker compose run --rm --no-deps -T --entrypoint sh db-init -c '
