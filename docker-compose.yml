@@ -108,7 +108,7 @@ services:
     <<: *airflow-common
     command: api-server
     ports:
-      - "127.0.0.1:${AIRFLOW_API_PORT:-27483}:8080"
+      - "127.0.0.1:${AIRFLOW_API_PORT:-8099}:8080"
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/monitor/health"]
       interval: 10s
@@ -173,7 +173,7 @@ services:
       SHOPBRASIL_DB_READER_USER: ${SHOPBRASIL_DB_READER_USER:-shopbrasil_reader}
       SHOPBRASIL_DB_READER_PASSWORD: ${SHOPBRASIL_DB_READER_PASSWORD:-ShopBrasilReaderDemo2026}
     ports:
-      - "127.0.0.1:${SHOPBRASIL_WEB_PORT:-28617}:8000"
+      - "127.0.0.1:${SHOPBRASIL_WEB_PORT:-8098}:8000"
     depends_on:
       postgres:
         condition: service_healthy
