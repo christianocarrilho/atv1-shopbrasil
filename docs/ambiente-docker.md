@@ -24,7 +24,7 @@ O LocalExecutor dispensa Redis e workers Celery. O triggerer ficou de fora porqu
 
 ## Contrato de configuração
 
-O [.env.example](../.env.example) lista todas as variáveis. O Compose falha com `defina <VARIÁVEL> no .env` quando uma variável obrigatória está vazia. Use senhas alfanuméricas, porque elas entram na URL do banco de metadados e no JSON da Connection sem escape.
+O Compose usa valores padrão para a demonstração local, incluindo o login `admin` com senha `ShopBrasilDemo2026`. O [.env.example](../.env.example) lista as variáveis que podem ser sobrescritas em um `.env` local. Use senhas alfanuméricas, porque elas entram na URL do banco de metadados e no JSON da Connection sem escape.
 
 | Variável | Uso |
 |---|---|
@@ -55,7 +55,7 @@ Os privilégios padrão (`ALTER DEFAULT PRIVILEGES FOR ROLE <administrativa> IN 
 
 ## Connection e pool
 
-- **Connection `shopbrasil_postgres`**: definida pela variável `AIRFLOW_CONN_SHOPBRASIL_POSTGRES` em formato JSON, montada no Compose a partir do `.env` com a conta de escrita. O `PostgresHook(postgres_conn_id="shopbrasil_postgres")` a resolve em qualquer processo do Airflow. A senha não é gravada no banco de metadados, e a Connection não aparece na lista de Connections da interface.
+- **Connection `shopbrasil_postgres`**: definida pela variável `AIRFLOW_CONN_SHOPBRASIL_POSTGRES` em formato JSON, montada no Compose com a conta de escrita e os valores padrão ou sobrescritos pelo `.env`. O `PostgresHook(postgres_conn_id="shopbrasil_postgres")` a resolve em qualquer processo do Airflow. A senha não é gravada no banco de metadados, e a Connection não aparece na lista de Connections da interface.
 - **Pool `ecommerce_pool`**: 2 slots, definido por `airflow pools set` no `airflow-init` a cada subida. As tasks mapeadas de cálculo devem declarar `pool="ecommerce_pool"` (#7 e #16).
 
 ## Coordenação com a #3 e com a Web/API
@@ -66,7 +66,6 @@ Os privilégios padrão (`ALTER DEFAULT PRIVILEGES FOR ROLE <administrativa> IN 
 ## Comandos
 
 ```sh
-cp .env.example .env                                   # preencher as senhas
 docker compose up -d --build --wait                    # postgres → db-init → Airflow e web
 curl -s http://localhost:8000/api/metricas/ultima-data # Web/API com a conta de leitura
 docker compose ps -a                                   # db-init e airflow-init com código 0

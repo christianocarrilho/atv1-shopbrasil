@@ -11,47 +11,38 @@ O foco da atividade é o pipeline. Esta página leva do clone a uma run concluí
 ## Pré-requisitos
 
 - Docker com Compose v2 (Docker Desktop ou Docker Engine) e cerca de 4 GB de memória livres para os contêineres.
-- `openssl`, para gerar as senhas locais.
 - Acesso à internet, para baixar as imagens e consultar a FakeStore.
 - Portas 8080 (Airflow) e 8000 (painel) livres em 127.0.0.1. Se estiverem ocupadas, troque `AIRFLOW_API_PORT` e `SHOPBRASIL_WEB_PORT` no `.env`.
 
 ## Início rápido
 
-**1. Gerar o `.env`.** O repositório não versiona senhas. O bloco abaixo copia o modelo e preenche as senhas em branco com valores aleatórios:
+Use o login de demonstração `admin` / `ShopBrasilDemo2026` no Airflow. Para personalizar o ambiente, copie o [.env.example](.env.example) para `.env` e preencha apenas os campos que deseja alterar.
 
-```sh
-cp .env.example .env
-for v in POSTGRES_PASSWORD SHOPBRASIL_DB_WRITER_PASSWORD SHOPBRASIL_DB_READER_PASSWORD \
-         AIRFLOW_DB_PASSWORD AIRFLOW_ADMIN_PASSWORD AIRFLOW_JWT_SECRET; do
-  sed -i.bak "s/^$v=\$/$v=$(openssl rand -hex 16)/" .env
-done
-rm -f .env.bak
-grep '^AIRFLOW_ADMIN_' .env   # usuário e senha da interface do Airflow
-```
-
-**2. Subir o ambiente.** A primeira subida baixa as imagens e constrói a web, o que leva alguns minutos. As seguintes levam cerca de 30 segundos.
+**1. Subir o ambiente.** A primeira subida baixa as imagens e constrói a web, o que leva alguns minutos. As seguintes levam cerca de 30 segundos.
 
 ```sh
 docker compose up -d --build --wait
 ```
 
-O `db-init` aplica o esquema e cria as contas do banco. O `airflow-init` cria o usuário da interface e o pool `ecommerce_pool` com 2 slots. A Connection `shopbrasil_postgres` vem do `.env` por variável de ambiente e por isso não aparece em **Admin → Connections** ([detalhes](docs/ambiente-docker.md#connection-e-pool)). `docker compose ps -a` deve mostrar `db-init` e `airflow-init` com `Exited (0)` e os demais serviços `healthy`. O `--wait` aguarda também o registro do DAG `shopbrasil_metricas`. Se a subida falhar no processador, consulte `docker compose logs airflow-dag-processor` e `docker compose exec airflow-dag-processor airflow dags list-import-errors` se o contêiner estiver em execução.
+O `db-init` aplica o esquema e cria as contas do banco. O `airflow-init` cria o usuário da interface e o pool `ecommerce_pool` com 2 slots. A Connection `shopbrasil_postgres` é configurada por variável de ambiente no Compose e por isso não aparece em **Admin → Connections** ([detalhes](docs/ambiente-docker.md#connection-e-pool)). `docker compose ps -a` deve mostrar `db-init` e `airflow-init` com `Exited (0)` e os demais serviços `healthy`. O `--wait` aguarda também o registro do DAG `shopbrasil_metricas`. Se a subida falhar no processador, consulte `docker compose logs airflow-dag-processor` e `docker compose exec airflow-dag-processor airflow dags list-import-errors` se o contêiner estiver em execução.
 
-**3. Ativar o DAG.** O DAG `shopbrasil_metricas` entra pausado. Ao despausá-lo, o Airflow cria uma run para a ocorrência das 06:00 de Brasília mais recente, cujo estado pode ser acompanhado com `list-runs`. Aguarde `success` e confirme no Graph que a task `publicacao.publicar` ficou em `success` antes de abrir o painel:
+**2. Ativar o DAG.** O DAG `shopbrasil_metricas` entra pausado. Ao despausá-lo, o Airflow cria uma run para a ocorrência das 06:00 de Brasília mais recente, cujo estado pode ser acompanhado com `list-runs`. Aguarde `success` e confirme no Graph que a task `publicacao.publicar` ficou em `success` antes de abrir o painel:
 
 ```sh
 docker compose exec airflow-scheduler airflow dags unpause shopbrasil_metricas
 docker compose exec airflow-scheduler airflow dags list-runs shopbrasil_metricas
 ```
 
-Na interface, em http://localhost:8080 com o usuário do passo 1, abra o DAG e use a visão **Graph** para ver os TaskGroups `preparacao`, `ingestao`, `analise` e `publicacao`, o fan-out de `calcular_metricas` (uma instância por categoria) e o fan-in em `consolidar`.
+Na interface, em http://localhost:8080 com o login de demonstração, abra o DAG e use a visão **Graph** para ver os TaskGroups `preparacao`, `ingestao`, `analise` e `publicacao`, o fan-out de `calcular_metricas` (uma instância por categoria) e o fan-in em `consolidar`.
 
-**4. Conferir o resultado.** O painel em http://localhost:8000 abre na data mais recente com métricas. As tabelas podem ser consultadas com a conta de leitura, que é a mesma usada pela web:
+**3. Conferir o resultado.** O painel em http://localhost:8000 abre na data mais recente com métricas. As tabelas podem ser consultadas com a conta de leitura, que é a mesma usada pela web:
 
 ```sh
-set -a; . ./.env; set +a
-docker compose exec -e PGPASSWORD="$SHOPBRASIL_DB_READER_PASSWORD" postgres \
-  psql -h postgres -U shopbrasil_reader -d shopbrasil -c "
+docker compose run --rm --no-deps -T --entrypoint sh db-init -c '
+  PGPASSWORD="$SHOPBRASIL_DB_READER_PASSWORD" exec psql \
+    -h "$SHOPBRASIL_DB_HOST" -p "$SHOPBRASIL_DB_PORT" \
+    -U "$SHOPBRASIL_DB_READER_USER" -d "$SHOPBRASIL_DB_NAME" "$@"
+' sh -c "
   SELECT m.data_referencia, c.codigo, m.preco_medio, m.preco_minimo, m.preco_maximo, m.quantidade_produtos
     FROM metricas_categoria m JOIN categoria c ON c.id = m.categoria_id ORDER BY 1, 2;"
 ```
@@ -60,7 +51,7 @@ O [guia de execução](docs/execucao.md) continua daqui: run de uma data especí
 
 ## Requisitos da atividade
 
-O DAG fica em [pipeline/dags/shopbrasil_metricas.py](pipeline/dags/shopbrasil_metricas.py). Ele só orquestra: a coleta, o cálculo e o SQL ficam no pacote [shopbrasil_pipeline](pipeline/shopbrasil_pipeline/), separado em domínio, aplicação e infraestrutura (veja [pipeline/README.md](pipeline/README.md)).
+O DAG fica em [pipeline/dags/shopbrasil_metricas.py](pipeline/dags/shopbrasil_metricas.py). Ele só orquestra: a coleta, o cálculo e o SQL ficam no pacote `shopbrasil_pipeline`, separado em domínio, aplicação e infraestrutura (veja [pipeline/README.md](pipeline/README.md)).
 
 ### Obrigatórios (seção 3)
 
@@ -94,12 +85,12 @@ O repositório é público, e o projeto inteiro sobe com `docker compose`: Postg
 
 ## Organização
 
-- [pipeline/](pipeline/): o DAG, o operador próprio e o pacote `shopbrasil_pipeline` (domínio, aplicação, infraestrutura e composição), com testes unitários em `pipeline/tests`.
-- [db/](db/): o esquema compartilhado ([schema.sql](db/schema.sql)) e as contas do banco. O [modelo de dados](docs/modelo-dados.md) descreve as tabelas.
-- [web/](web/): Web/API de leitura com o painel, um extra fora do escopo obrigatório.
-- [e2e/](e2e/): a suíte de ponta a ponta com Airflow e PostgreSQL reais e uma FakeStore controlada (`e2e/executar_todos.sh`).
-- [qualidade/](qualidade/): o lint de arquitetura (`python3 qualidade/lint_arquitetura.py`).
-- [docs/](docs/): a [especificação](docs/especificacao.md), o [guia de execução](docs/execucao.md), o [ambiente Docker](docs/ambiente-docker.md) e as [evidências](docs/evidencias.md) com os comandos e resultados de cada entrega.
+- [pipeline/](pipeline/README.md): o DAG, o operador próprio e o pacote `shopbrasil_pipeline` (domínio, aplicação, infraestrutura e composição), com testes unitários em `pipeline/tests`.
+- [db/](db/README.md): o esquema compartilhado ([schema.sql](db/schema.sql)) e as contas do banco. O [modelo de dados](docs/modelo-dados.md) descreve as tabelas.
+- [web/](web/README.md): Web/API de leitura com o painel, um extra fora do escopo obrigatório.
+- [e2e/](e2e/README.md): a suíte de ponta a ponta com Airflow e PostgreSQL reais e uma FakeStore controlada (`e2e/executar_todos.sh`).
+- [qualidade/](qualidade/README.md): o lint de arquitetura (`python3 qualidade/lint_arquitetura.py`).
+- [docs/](docs/README.md): a [especificação](docs/especificacao.md), o [guia de execução](docs/execucao.md), o [ambiente Docker](docs/ambiente-docker.md) e as [evidências](docs/evidencias.md) com os comandos e resultados de cada entrega.
 
 ## Verificações rápidas sem Docker
 

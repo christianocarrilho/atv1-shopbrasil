@@ -57,7 +57,6 @@ Alternativas descartadas: `/docker-entrypoint-initdb.d` só executa com o volume
 Os nomes de serviço são uma previsão. A #2 pode ajustá-los ao escrever o `docker-compose.yml`.
 
 ```sh
-cp .env.example .env                      # preencher as senhas locais
 docker compose pull
 docker compose up -d                      # postgres → db-init → Airflow e web
 docker compose run --rm db-init           # reaplica db/schema.sql sob demanda

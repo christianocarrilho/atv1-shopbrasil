@@ -6,13 +6,9 @@ Matrícula: 262987
 
 Guia para subir os módulos, verificar o DAG e o painel, reprocessar uma run, simular a queda da API e rodar a suíte E2E. O [README](../README.md) traz o início rápido e o mapa dos requisitos da atividade. Detalhes de serviços, contas e Connection estão no [guia do ambiente Docker](ambiente-docker.md).
 
-## 1. Configuração sem segredos versionados
+## 1. Configuração da demonstração
 
-```sh
-cp .env.example .env    # só se o .env ainda não existir
-```
-
-Preencha no `.env` as senhas em branco (`POSTGRES_PASSWORD`, `SHOPBRASIL_DB_WRITER_PASSWORD`, `SHOPBRASIL_DB_READER_PASSWORD`, `AIRFLOW_DB_PASSWORD`, `AIRFLOW_ADMIN_PASSWORD`) e o `AIRFLOW_JWT_SECRET` (`openssl rand -hex 32`). Use valores alfanuméricos; o [README](../README.md#início-rápido) tem um bloco que gera todos de uma vez. O `.env` não é versionado; o [.env.example](../.env.example) é o contrato.
+O Compose já inclui os valores padrão. Para personalizar o ambiente, copie o [.env.example](../.env.example) para `.env` e preencha apenas os campos que deseja alterar. Use valores alfanuméricos para as credenciais do banco.
 
 ## 2. Subir os módulos
 
@@ -23,7 +19,7 @@ docker compose up -d --build --wait
 | Módulo | Endereço | Observação |
 |---|---|---|
 | PostgreSQL + `db-init` | interno | aplica [db/schema.sql](../db/schema.sql) e as contas de escrita e leitura |
-| Airflow 3.4 | http://localhost:8080 | usuário `AIRFLOW_ADMIN_USER` do `.env`; LocalExecutor, Connection `shopbrasil_postgres` e pool `ecommerce_pool` (2 slots) |
+| Airflow 3.4 | http://localhost:8080 | usuário padrão `admin`, senha `ShopBrasilDemo2026`; LocalExecutor, Connection `shopbrasil_postgres` e pool `ecommerce_pool` (2 slots) |
 | Web/API | http://localhost:8000 | painel em `/`, API em `/api/...`, OpenAPI em `/docs` |
 
 Se as portas 8080 ou 8000 estiverem ocupadas, troque `AIRFLOW_API_PORT` ou `SHOPBRASIL_WEB_PORT` no `.env`. O pipeline não depende da web: `docker compose up -d --wait airflow-apiserver airflow-scheduler airflow-dag-processor` sobe só a orquestração.
@@ -57,13 +53,21 @@ docker compose exec airflow-scheduler airflow dags trigger shopbrasil_metricas \
 
 Abra http://localhost:8000. O painel abre na última data com métricas, mostra a tabela e as barras do preço médio e, abaixo, a linha de evolução com filtros de categoria e intervalo. Data sem registros exibe “Sem métricas para esta data”.
 
-Snapshot e histórico por run, lidos pela conta de leitura (a mesma da web, sem permissão de escrita). Carregue antes as variáveis do `.env` no shell (`set -a; . ./.env; set +a`):
+Snapshot e histórico por run, lidos pela conta de leitura (a mesma da web, sem permissão de escrita):
 
 ```sh
-docker compose exec -e PGPASSWORD="$SHOPBRASIL_DB_READER_PASSWORD" postgres psql -h postgres -U shopbrasil_reader -d shopbrasil -c "
+docker compose run --rm --no-deps -T --entrypoint sh db-init -c '
+  PGPASSWORD="$SHOPBRASIL_DB_READER_PASSWORD" exec psql \
+    -h "$SHOPBRASIL_DB_HOST" -p "$SHOPBRASIL_DB_PORT" \
+    -U "$SHOPBRASIL_DB_READER_USER" -d "$SHOPBRASIL_DB_NAME" "$@"
+' sh -c "
   SELECT m.data_referencia, c.codigo, m.preco_medio, m.preco_minimo, m.preco_maximo, m.quantidade_produtos
     FROM metricas_categoria m JOIN categoria c ON c.id = m.categoria_id ORDER BY 1, 2;"
-docker compose exec -e PGPASSWORD="$SHOPBRASIL_DB_READER_PASSWORD" postgres psql -h postgres -U shopbrasil_reader -d shopbrasil -c "
+docker compose run --rm --no-deps -T --entrypoint sh db-init -c '
+  PGPASSWORD="$SHOPBRASIL_DB_READER_PASSWORD" exec psql \
+    -h "$SHOPBRASIL_DB_HOST" -p "$SHOPBRASIL_DB_PORT" \
+    -U "$SHOPBRASIL_DB_READER_USER" -d "$SHOPBRASIL_DB_NAME" "$@"
+' sh -c "
   SELECT h.run_id, h.data_execucao, h.publicado_em, c.codigo, h.preco_medio, h.quantidade_produtos
     FROM metricas_categoria_historico h JOIN categoria c ON c.id = h.categoria_id ORDER BY 1, 4;"
 ```
@@ -100,10 +104,14 @@ Na interface, abra a run e use **Clear** → **Clear existing tasks**. O log de 
 [SHOPBRASIL][PUBLICACAO] run=manual__2026-11-21 data=2026-11-21 snapshot: 4 linha(s) anterior(es) do dia substituída(s) por 4; categoria(s) nova(s) no cadastro: nenhuma
 ```
 
-Na primeira execução do dia, as linhas são `4 linha(s) gravada(s), 0 já registrada(s)` e `0 linha(s) anterior(es) do dia substituída(s) por 4`. Para conferir as contagens no banco (com o `.env` carregado, como na seção 4):
+Na primeira execução do dia, as linhas são `4 linha(s) gravada(s), 0 já registrada(s)` e `0 linha(s) anterior(es) do dia substituída(s) por 4`. Para conferir as contagens no banco:
 
 ```sh
-docker compose exec -e PGPASSWORD="$SHOPBRASIL_DB_READER_PASSWORD" postgres psql -h postgres -U shopbrasil_reader -d shopbrasil \
+docker compose run --rm --no-deps -T --entrypoint sh db-init -c '
+  PGPASSWORD="$SHOPBRASIL_DB_READER_PASSWORD" exec psql \
+    -h "$SHOPBRASIL_DB_HOST" -p "$SHOPBRASIL_DB_PORT" \
+    -U "$SHOPBRASIL_DB_READER_USER" -d "$SHOPBRASIL_DB_NAME" "$@"
+' sh \
   -c "SELECT data_referencia, count(*) FROM metricas_categoria GROUP BY 1 ORDER BY 1;" \
   -c "SELECT run_id, count(*) FROM metricas_categoria_historico GROUP BY 1 ORDER BY 1;"
 ```

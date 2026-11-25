@@ -35,7 +35,7 @@ A publicação usa `PostgresHook` e uma Connection do Airflow. Cadastro de categ
 
 ## Ambiente, critérios de qualidade e entrega — #1, #2, #11, #12, #22 e #23
 
-- Dockerizar o projeto e manter a execução do pipeline independente da web. Provisionar pool e Connection. Separar credenciais de leitura e escrita. Usar `.env.example` para a configuração inicial e `.env` local para valores privados.
+- Dockerizar o projeto e manter a execução do pipeline independente da web. Provisionar pool e Connection. Separar credenciais de leitura e escrita. Fornecer valores padrão no Compose para a demonstração local e usar `.env.example` como modelo para sobrescritas em um `.env` local.
 - A #1 fixa as versões compatíveis de Python, Airflow, provider e PostgreSQL, a tecnologia Web/API e a aplicação do esquema. O `start_date` concreto fica na #4. O contrato HTTP fica na #9. Essas são entregas das respectivas issues.
 - Claude Opus implementa DAG, ingestão e análise. Kiro com Claude Opus implementa ambiente, esquema e persistência. As duas frentes alinham o contrato da #15 e revisam o código uma da outra. Codex faz a revisão final integrada, incluindo a Web/API.
 - Suíte E2E reproduzível em Docker com Airflow e PostgreSQL reais e respostas controladas da FakeStore. A #23 contém o checklist de execução normal, falhas e retentativas, catálogo inválido ou vazio, categorias novas e ausentes, concorrência, XCom, idempotência, rollback e painel.
