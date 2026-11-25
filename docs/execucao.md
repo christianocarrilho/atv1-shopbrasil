@@ -19,10 +19,10 @@ docker compose up -d --build --wait
 | Módulo | Endereço | Observação |
 |---|---|---|
 | PostgreSQL + `db-init` | interno | aplica [db/schema.sql](../db/schema.sql) e as contas de escrita e leitura |
-| Airflow 3.4 | http://localhost:8080 | usuário padrão `admin`, senha `ShopBrasilDemo2026`; LocalExecutor, Connection `shopbrasil_postgres` e pool `ecommerce_pool` (2 slots) |
-| Web/API | http://localhost:8000 | painel em `/`, API em `/api/...`, OpenAPI em `/docs` |
+| Airflow 3.4 | http://localhost:27483 | usuário padrão `admin`, senha `ShopBrasilDemo2026`; LocalExecutor, Connection `shopbrasil_postgres` e pool `ecommerce_pool` (2 slots) |
+| Web/API | http://localhost:28617 | painel em `/`, API em `/api/...`, OpenAPI em `/docs` |
 
-Se as portas 8080 ou 8000 estiverem ocupadas, troque `AIRFLOW_API_PORT` ou `SHOPBRASIL_WEB_PORT` no `.env`. O pipeline não depende da web: `docker compose up -d --wait airflow-apiserver airflow-scheduler airflow-dag-processor` sobe só a orquestração.
+Se as portas 27483 ou 28617 estiverem ocupadas, troque `AIRFLOW_API_PORT` ou `SHOPBRASIL_WEB_PORT` no `.env`. O pipeline não depende da web: `docker compose up -d --wait airflow-apiserver airflow-scheduler airflow-dag-processor` sobe só a orquestração.
 
 ## 3. Verificar o DAG
 
@@ -51,7 +51,7 @@ docker compose exec airflow-scheduler airflow dags trigger shopbrasil_metricas \
 
 ## 4. Verificar o painel e o banco
 
-Abra http://localhost:8000. O painel abre na última data com métricas, mostra a tabela e as barras do preço médio e, abaixo, a linha de evolução com filtros de categoria e intervalo. Data sem registros exibe “Sem métricas para esta data”.
+Abra http://localhost:28617. O painel abre na última data com métricas, mostra a tabela e as barras do preço médio e, abaixo, a linha de evolução com filtros de categoria e intervalo. Data sem registros exibe “Sem métricas para esta data”.
 
 Snapshot e histórico por run, lidos pela conta de leitura (a mesma da web, sem permissão de escrita):
 

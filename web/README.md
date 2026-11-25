@@ -19,7 +19,7 @@ O pacote não importa `pipeline/`: o contrato entre os módulos é o esquema em 
 
 ## Contrato HTTP — para as #19–#21
 
-Base: `http://localhost:${SHOPBRASIL_WEB_PORT}` (padrão 8000, só em 127.0.0.1). A documentação OpenAPI gerada fica em `/docs` e `/openapi.json`.
+Base: `http://localhost:${SHOPBRASIL_WEB_PORT}` (padrão 28617, só em 127.0.0.1). A documentação OpenAPI gerada fica em `/docs` e `/openapi.json`.
 
 Convenções:
 
@@ -97,7 +97,7 @@ O serviço `web` do [docker-compose.yml](../docker-compose.yml) é construído d
 
 ```sh
 docker compose up -d --build --wait web                     # postgres → db-init → web
-curl -s http://localhost:8000/api/metricas/ultima-data
+curl -s http://localhost:28617/api/metricas/ultima-data
 docker compose run --rm --no-deps web python -m unittest discover -s tests -t .
 ```
 
