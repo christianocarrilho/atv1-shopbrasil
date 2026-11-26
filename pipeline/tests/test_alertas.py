@@ -17,61 +17,55 @@ from shopbrasil_pipeline.aplicacao.alertas import (
     notificar_retry,
     notificar_sucesso,
 )
-from shopbrasil_pipeline.infraestrutura.notificador_log import NotificadorLog
 
-
-class Registro:
-    def __init__(self):
-        self.avisos: list[str] = []
-        self.alertas: list[tuple[str, str]] = []
-
-    def registrar(self, mensagem):
-        self.avisos.append(mensagem)
-
-    def enviar_alerta(self, assunto, mensagem):
-        self.alertas.append((assunto, mensagem))
-
-
+LOGGER = "shopbrasil.alertas"
 OCORRENCIA = OcorrenciaTask("shopbrasil_metricas", "run-1", "ingestao.buscar_produtos", 2, 4, "HTTPError: 500")
+
+
+def mensagens(logs) -> list[str]:
+    return [registro.getMessage() for registro in logs.records]
 
 
 class AlertasTest(unittest.TestCase):
     def test_mensagens_identificam_evento_run_task_e_tentativa(self):
-        registro = Registro()
-        notificar_sucesso(registro, OCORRENCIA)
-        notificar_retry(registro, OCORRENCIA)
-        notificar_falha(registro, OCORRENCIA)
+        with self.assertLogs(LOGGER) as logs:
+            notificar_sucesso(OCORRENCIA)
+            notificar_retry(OCORRENCIA)
+            notificar_falha(OCORRENCIA)
+        avisos = mensagens(logs)
         self.assertEqual(
-            [m.split(" ")[0] for m in registro.avisos],
+            [m.split(" ")[0] for m in avisos],
             ["[SHOPBRASIL][SUCESSO]", "[SHOPBRASIL][RETRY]", "[SHOPBRASIL][FALHA]"],
         )
-        for mensagem in registro.avisos:
+        for mensagem in avisos:
             self.assertIn("run=run-1 task=ingestao.buscar_produtos tentativa=2/4", mensagem)
-        self.assertEqual(registro.alertas, [])
+            self.assertNotIn("ALERTA", mensagem)
 
     def test_falha_da_ingestao_avisa_e_simula_alerta(self):
-        registro = Registro()
-        notificar_falha_ingestao(registro, OcorrenciaTask("d", "run-9", "ingestao.buscar_produtos", 4, 4, "URLError"))
-        self.assertTrue(registro.avisos[0].startswith("[SHOPBRASIL][FALHA]"))
-        self.assertEqual(len(registro.alertas), 1)
-        self.assertIn("run-9", registro.alertas[0][0])
-        self.assertIn("esgotou 4 tentativa(s)", registro.alertas[0][1])
+        with self.assertLogs(LOGGER) as logs:
+            notificar_falha_ingestao(OcorrenciaTask("d", "run-9", "ingestao.buscar_produtos", 4, 4, "URLError"))
+        aviso, alerta = mensagens(logs)
+        self.assertTrue(aviso.startswith("[SHOPBRASIL][FALHA]"))
+        self.assertTrue(
+            alerta.startswith(
+                "[SHOPBRASIL][ALERTA SIMULADO] destino=equipe-dados@shopbrasil.example "
+                "assunto=ShopBrasil: ingestão da FakeStore falhou na run run-9 | "
+            )
+        )
+        self.assertIn("esgotou 4 tentativa(s); a publicação da run não ocorreu.", alerta)
+        self.assertEqual(logs.records[1].levelname, "ERROR")
 
     def test_falha_sem_retentativa_nao_diz_que_esgotou(self):
-        registro = Registro()
-        notificar_falha_ingestao(registro, OcorrenciaTask("d", "run-1", "ingestao.buscar_produtos", 1, 4, "AirflowFailException"))
-        self.assertIn("sem retentativa (erro não recuperável) na tentativa 1/4", registro.alertas[0][1])
-        self.assertNotIn("esgotou", registro.alertas[0][1])
+        with self.assertLogs(LOGGER) as logs:
+            notificar_falha_ingestao(OcorrenciaTask("d", "run-1", "ingestao.buscar_produtos", 1, 4, "AirflowFailException"))
+        alerta = mensagens(logs)[1]
+        self.assertIn("sem retentativa (erro não recuperável) na tentativa 1/4", alerta)
+        self.assertNotIn("esgotou", alerta)
 
     def test_falha_da_run(self):
-        registro = Registro()
-        notificar_falha_run(registro, "shopbrasil_metricas", "run-2", None)
-        self.assertEqual(registro.avisos, ["[SHOPBRASIL][FALHA RUN] dag=shopbrasil_metricas run=run-2 motivo=não informado"])
-
-    def test_notificador_log_simula_envio(self):
-        with self.assertLogs("shopbrasil.alertas") as capturado:
-            NotificadorLog("equipe@exemplo").enviar_alerta("assunto", "mensagem")
-        self.assertIn("[SHOPBRASIL][ALERTA SIMULADO] destino=equipe@exemplo assunto=assunto | mensagem", capturado.output[0])
+        with self.assertLogs(LOGGER) as logs:
+            notificar_falha_run("shopbrasil_metricas", "run-2", None)
+        self.assertEqual(mensagens(logs), ["[SHOPBRASIL][FALHA RUN] dag=shopbrasil_metricas run=run-2 motivo=não informado"])
 
 
 if __name__ == "__main__":

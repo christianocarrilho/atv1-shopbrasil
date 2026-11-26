@@ -16,3 +16,6 @@ __pycache__/
 
 # Saídas locais de e2e/executar_todos.sh
 e2e/resultados/
+
+# Material de estudo pessoal, fora da entrega
+/estudo/

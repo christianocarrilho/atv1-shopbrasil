@@ -8,7 +8,7 @@
 # shopbrasil_postgres (conta de escrita), o PostgreSQL 18.7 e o esquema da #3 reais.
 # Cobre cadastro de categoria nova, republicação da mesma data com uma linha por data+categoria,
 # categoria ausente fora do dia com cadastro preservado, outra data intacta, rollback por falha
-# injetada no ponto de extensão e por erro do banco, e valores lidos iguais aos publicados.
+# injetada depois do histórico e por erro do banco, e valores lidos iguais aos publicados.
 # Do histórico (H1-H4): primeira publicação grava as linhas da run com os valores publicados;
 # reprocessar a mesma run com métricas diferentes mantém as linhas originais (valores e xmin)
 # enquanto o snapshot é substituído; violação de CHECK no histórico reverte cadastro e snapshot;
@@ -175,10 +175,10 @@ HIST_FIS="$(historico_fisico)"
 verificar "U7 $D0 intacta (valores)" "$SNAP_D0" "$(snapshot "$D0")"
 verificar "U7 $D0 intacta (id e xmin das linhas)" "$FIS_D0" "$(linhas_fisicas "$D0")"
 
-# U8. Falha injetada no ponto de extensão, depois do snapshot e antes do commit.
+# U8. Falha injetada depois do snapshot e do histórico, antes do commit.
 M_FALHA="$(lista "$(m electronics 99.00 99.00 99.00 1)" "$(m toys 5.00 5.00 5.00 1)")"
 saida="$(publicar falhar_etapa "$R1" "$D1" "$M_FALHA")"
-verificar "U8 erro da etapa adicional" "FalhaInjetada|falha injetada após o snapshot (2 linha(s) visíveis na transação, 4 no histórico da run)" \
+verificar "U8 erro injetado depois do histórico" "FalhaInjetada|falha injetada após o snapshot (2 linha(s) visíveis na transação, 4 no histórico da run)" \
   "$(campo erro <<<"$saida")|$(campo mensagem <<<"$saida")"
 verificar "U8 histórico preservado (toys revertida)" "$HIST_TODOS|$HIST_FIS" "$(historico_todos)|$(historico_fisico)"
 verificar "U8 snapshot anterior preservado" "$SNAP_D1|$FIS_D1" "$(snapshot "$D1")|$(linhas_fisicas "$D1")"

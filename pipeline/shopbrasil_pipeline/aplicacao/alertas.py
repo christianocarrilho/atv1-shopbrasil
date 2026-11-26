@@ -1,22 +1,24 @@
-"""Avisos de execução e alerta simulado do pipeline (#14).
+"""Avisos dos callbacks e alerta simulado do pipeline (#14).
 
 Autor: Christiano Henrique Carrilho Lopes da Silva
 Código de pessoa: 1691353
 Matrícula: 262987
 
-Define o contrato do notificador e as mensagens dos callbacks. Cada mensagem começa com
-``[SHOPBRASIL][<EVENTO>]`` e traz DAG, run, task e tentativa, para ser encontrada nos logs da
-task. Na falha definitiva da ingestão, além do aviso, o alerta é enviado ao notificador, que
-nesta entrega apenas simula o envio. O DAG só traduz o contexto do Airflow para
-``OcorrenciaTask``.
+Cada aviso é uma linha de log que começa com ``[SHOPBRASIL][<EVENTO>]`` e traz DAG, run, task e
+tentativa, para ser encontrada no log da própria tentativa. Na falha definitiva da ingestão, o
+alerta à equipe é simulado por uma linha ``[SHOPBRASIL][ALERTA SIMULADO]``: o envio real (e-mail,
+chat) ficaria neste ponto. O DAG só traduz o contexto do Airflow para ``OcorrenciaTask``.
 """
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
-from typing import Protocol
 
 PREFIXO = "[SHOPBRASIL]"
+DESTINO_ALERTA = "equipe-dados@shopbrasil.example"
+
+log = logging.getLogger("shopbrasil.alertas")
 
 
 @dataclass(frozen=True)
@@ -38,38 +40,26 @@ class OcorrenciaTask:
         return f"{texto} erro={self.erro}" if self.erro else texto
 
 
-class Notificador(Protocol):
-    """Destino dos avisos e alertas do pipeline."""
-
-    def registrar(self, mensagem: str) -> None:
-        """Registra um aviso identificável."""
-        ...
-
-    def enviar_alerta(self, assunto: str, mensagem: str) -> None:
-        """Envia um alerta à equipe responsável."""
-        ...
+def notificar_sucesso(ocorrencia: OcorrenciaTask) -> None:
+    log.warning("%s[SUCESSO] %s", PREFIXO, ocorrencia.descricao())
 
 
-def notificar_sucesso(notificador: Notificador, ocorrencia: OcorrenciaTask) -> None:
-    notificador.registrar(f"{PREFIXO}[SUCESSO] {ocorrencia.descricao()}")
+def notificar_retry(ocorrencia: OcorrenciaTask) -> None:
+    log.warning("%s[RETRY] %s", PREFIXO, ocorrencia.descricao())
 
 
-def notificar_retry(notificador: Notificador, ocorrencia: OcorrenciaTask) -> None:
-    notificador.registrar(f"{PREFIXO}[RETRY] {ocorrencia.descricao()}")
-
-
-def notificar_falha(notificador: Notificador, ocorrencia: OcorrenciaTask) -> None:
+def notificar_falha(ocorrencia: OcorrenciaTask) -> None:
     """Aviso identificável de falha de qualquer task do pipeline."""
-    notificador.registrar(f"{PREFIXO}[FALHA] {ocorrencia.descricao()}")
+    log.warning("%s[FALHA] %s", PREFIXO, ocorrencia.descricao())
 
 
-def notificar_falha_ingestao(notificador: Notificador, ocorrencia: OcorrenciaTask) -> None:
-    """Falha definitiva da ingestão: aviso e alerta.
+def notificar_falha_ingestao(ocorrencia: OcorrenciaTask) -> None:
+    """Falha definitiva da ingestão: aviso de falha e alerta simulado.
 
     A falha é definitiva quando as tentativas se esgotam ou quando o erro não é recuperável (por
     exemplo, configuração inválida), caso em que a task falha antes da última tentativa.
     """
-    notificar_falha(notificador, ocorrencia)
+    notificar_falha(ocorrencia)
     if ocorrencia.tentativa >= ocorrencia.max_tentativas:
         causa = f"Buscar Produtos esgotou {ocorrencia.max_tentativas} tentativa(s)"
     else:
@@ -77,12 +67,17 @@ def notificar_falha_ingestao(notificador: Notificador, ocorrencia: OcorrenciaTas
             f"Buscar Produtos falhou sem retentativa (erro não recuperável) na tentativa "
             f"{ocorrencia.tentativa}/{ocorrencia.max_tentativas}"
         )
-    notificador.enviar_alerta(
-        assunto=f"ShopBrasil: ingestão da FakeStore falhou na run {ocorrencia.run_id}",
-        mensagem=f"{causa}; a publicação da run não ocorreu. {ocorrencia.descricao()}",
+    log.error(
+        "%s[ALERTA SIMULADO] destino=%s assunto=ShopBrasil: ingestão da FakeStore falhou na run %s | "
+        "%s; a publicação da run não ocorreu. %s",
+        PREFIXO,
+        DESTINO_ALERTA,
+        ocorrencia.run_id,
+        causa,
+        ocorrencia.descricao(),
     )
 
 
-def notificar_falha_run(notificador: Notificador, dag_id: str, run_id: str, motivo: str | None) -> None:
+def notificar_falha_run(dag_id: str, run_id: str, motivo: str | None) -> None:
     """Aviso de falha da run inteira, inclusive quando nenhuma task chamou o próprio callback."""
-    notificador.registrar(f"{PREFIXO}[FALHA RUN] dag={dag_id} run={run_id} motivo={motivo or 'não informado'}")
+    log.warning("%s[FALHA RUN] dag=%s run=%s motivo=%s", PREFIXO, dag_id, run_id, motivo or "não informado")

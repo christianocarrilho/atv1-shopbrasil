@@ -500,3 +500,16 @@ Em 25 nov. 2026, um clone novo de `main` 27bde3e foi conferido seguindo o README
 
 Entrega: o repositório é público, e o autor postou no canal da atividade, em 25 nov. 2026, o link do repositório e o deste documento.
 
+
+## Simplificação do pipeline — #69
+
+Em 25 nov. 2026, a simplificação da #69 foi validada sobre `main` 9b0dba2 com as alterações da issue, usando Python 3.14.7 no host e a suíte E2E em projetos Docker descartáveis. Os alertas passaram a escrever direto no log, o histórico virou um passo explícito da transação de publicação e os ajustes de tempo do E2E saíram do DAG. Nenhum requisito do enunciado foi retirado, e o formato das linhas `[SHOPBRASIL]` foi mantido.
+
+| Comando | Resultado observado |
+|---|---|
+| `python3 -m unittest discover -s tests` (em `pipeline/`) | `Ran 82 tests ... OK (skipped=4)` |
+| `python3 qualidade/lint_arquitetura.py` | `OK: 48 arquivo(s) Python verificado(s), nenhuma violação de arquitetura.` |
+| `python3 -m unittest discover -s qualidade/tests` | `Ran 39 tests ... OK` |
+| `e2e/executar_todos.sh` | **267 PASS, 0 FAIL**: ambiente 31, esquema 38, pipeline 77, publicacao 48, web 35, integrado 38 |
+
+Uma execução anterior da suíte, sobre uma versão intermediária da mudança, falhou em U2, U3 e U5 da publicação: a lista de categorias cadastradas devolvia só a primeira, porque o resultado do `RETURNING` era lido duas vezes. Os dados gravados não foram afetados. O código passou a ler o resultado uma vez, e o cursor falso dos testes unitários passou a esgotar o resultado como o `psycopg2`, para pegar esse tipo de erro sem o E2E.
