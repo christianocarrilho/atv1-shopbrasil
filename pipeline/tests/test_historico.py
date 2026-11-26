@@ -1,52 +1,32 @@
-"""Testes da etapa de histórico por run e da sua ligação na composição (#18).
+"""Testes da publicação transacional com o histórico por run (#17, #18).
 
 Autor: Christiano Henrique Carrilho Lopes da Silva
 Código de pessoa: 1691353
 Matrícula: 262987
 
-Usam cursor e conexão falsos, sem PostgreSQL. O provider do Airflow é substituído por um módulo
-vazio em ``sys.modules`` só para importar o adaptador da #17 e conferir a ordem das gravações e o
-desfecho da transação; o comportamento no banco real é coberto por ``e2e/publicacao``. Rodam só
-com a biblioteca padrão: ``python3 -m unittest discover -s pipeline/tests -t pipeline``.
+Usam cursor e conexão falsos, sem PostgreSQL, para conferir a ordem das gravações, o append do
+histórico e o desfecho da transação; o comportamento no banco real é coberto por
+``e2e/publicacao``. Rodam só com a biblioteca padrão:
+``python3 -m unittest discover -s pipeline/tests -t pipeline``.
 """
 
 from __future__ import annotations
 
-import sys
-import types
 import unittest
-from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
-from unittest import mock
 
 from shopbrasil_pipeline.aplicacao.execucao import Execucao
 from shopbrasil_pipeline.dominio.metricas import MetricasCategoria
-from shopbrasil_pipeline.infraestrutura.historico_postgres import RegistrarHistoricoPostgres
+from shopbrasil_pipeline.infraestrutura.publicacao_postgres import PublicadorSnapshotPostgres, _gravar_historico
 
+LOGGER = "shopbrasil_pipeline.infraestrutura.publicacao_postgres"
 EXECUCAO = Execucao("scheduled__2026-11-21T09:00:00+00:00", date(2026, 11, 21))
 METRICAS = (
     MetricasCategoria("electronics", Decimal("10.00"), Decimal("10.00"), Decimal("10.01"), 3),
     MetricasCategoria("jewelery", Decimal("10.01"), Decimal("10.00"), Decimal("10.01"), 2),
 )
-
-
-def _provider_falso() -> dict[str, types.ModuleType]:
-    """Módulos mínimos para importar ``publicacao_postgres`` sem o Airflow instalado."""
-    nomes = ["airflow", "airflow.providers", "airflow.providers.postgres", "airflow.providers.postgres.hooks"]
-    modulos = {nome: types.ModuleType(nome) for nome in nomes}
-    hooks = types.ModuleType("airflow.providers.postgres.hooks.postgres")
-    hooks.PostgresHook = object  # nunca instanciado: os testes injetam ``abrir_conexao``
-    modulos[hooks.__name__] = hooks
-    return modulos
-
-
-@dataclass(frozen=True)
-class SnapshotFalso:
-    execucao: Execucao
-    metricas: tuple[MetricasCategoria, ...]
-    categoria_ids: dict[str, int]
-
+IDS = {"electronics": 7, "jewelery": 9}
 
 class CursorFalso:
     def __init__(
@@ -85,7 +65,9 @@ class CursorFalso:
         self._registrar(sql, list(linhas))
 
     def fetchall(self):
-        return self._resultado
+        # Como no psycopg2, o resultado se esgota na leitura.
+        resultado, self._resultado = self._resultado, []
+        return resultado
 
 
 class ConexaoFalsa:
@@ -110,10 +92,10 @@ class ConexaoFalsa:
         self.fechada = True
 
 
-class RegistrarHistoricoTest(unittest.TestCase):
+class GravarHistoricoTest(unittest.TestCase):
     def test_insere_uma_linha_por_categoria_com_run_e_data_de_referencia(self):
         cursor = CursorFalso()
-        RegistrarHistoricoPostgres()(cursor, SnapshotFalso(EXECUCAO, METRICAS, {"electronics": 7, "jewelery": 9}))
+        _gravar_historico(cursor, EXECUCAO, METRICAS, IDS)
         self.assertEqual(len(cursor.comandos), 2)
         self.assertIn("SELECT", cursor.comandos[0][0])  # leitura do que a run já tem, antes do INSERT
         sql, linhas = cursor.comandos[1]
@@ -130,14 +112,13 @@ class RegistrarHistoricoTest(unittest.TestCase):
 
     def test_valores_sao_os_mesmos_objetos_decimal_publicados(self):
         cursor = CursorFalso()
-        RegistrarHistoricoPostgres()(cursor, SnapshotFalso(EXECUCAO, METRICAS[:1], {"electronics": 1}))
+        _gravar_historico(cursor, EXECUCAO, METRICAS[:1], {"electronics": 1})
         linha = cursor.comandos[1][1][0]
         self.assertIs(linha[3], METRICAS[0].preco_medio)
-        self.assertIsInstance(linha[3], Decimal)
 
     def test_nao_controla_a_transacao(self):
         cursor = CursorFalso()
-        RegistrarHistoricoPostgres()(cursor, SnapshotFalso(EXECUCAO, METRICAS, {"electronics": 1, "jewelery": 2}))
+        _gravar_historico(cursor, EXECUCAO, METRICAS, IDS)
         texto = " ".join(sql for sql, _ in cursor.comandos).upper()
         for palavra in ("COMMIT", "ROLLBACK", "BEGIN"):
             self.assertNotIn(palavra, texto)
@@ -146,54 +127,27 @@ class RegistrarHistoricoTest(unittest.TestCase):
         iguais = [(7, Decimal("10.00"), Decimal("10.00"), Decimal("10.01"), 3),
                   (9, Decimal("10.01"), Decimal("10.00"), Decimal("10.01"), 2)]
         cursor = CursorFalso(historico_da_run=iguais)
-        with self.assertNoLogs("shopbrasil_pipeline.infraestrutura.historico_postgres", "WARNING"):
-            divergentes = RegistrarHistoricoPostgres()(cursor, SnapshotFalso(EXECUCAO, METRICAS, {"electronics": 7, "jewelery": 9}))
-        self.assertEqual([], divergentes)
+        with self.assertNoLogs(LOGGER, "WARNING"):
+            preservadas = _gravar_historico(cursor, EXECUCAO, METRICAS, IDS)
+        self.assertEqual(2, preservadas)
 
     def test_reprocessamento_com_valores_novos_preserva_e_avisa(self):
         antigos = [(7, Decimal("20.00"), Decimal("15.00"), Decimal("25.00"), 2),
                    (9, Decimal("10.01"), Decimal("10.00"), Decimal("10.01"), 2)]
         cursor = CursorFalso(historico_da_run=antigos)
-        with self.assertLogs("shopbrasil_pipeline.infraestrutura.historico_postgres", "WARNING") as logs:
-            divergentes = RegistrarHistoricoPostgres()(cursor, SnapshotFalso(EXECUCAO, METRICAS, {"electronics": 7, "jewelery": 9}))
-        self.assertEqual(["electronics"], divergentes)
+        with self.assertLogs(LOGGER, "WARNING") as logs:
+            _gravar_historico(cursor, EXECUCAO, METRICAS, IDS)
+        self.assertEqual(1, len(logs.output))
         self.assertIn("categoria=electronics histórico=20.00/15.00/25.00/2 snapshot=10.00/10.00/10.01/3", logs.output[0])
         # A linha original não é atualizada: o INSERT segue com DO NOTHING.
         self.assertNotIn("DO UPDATE", cursor.comandos[1][0])
 
-    def test_log_conta_linhas_gravadas_numa_run_nova(self):
-        cursor = CursorFalso()
-        with self.assertLogs("shopbrasil_pipeline.infraestrutura.historico_postgres", "INFO") as logs:
-            RegistrarHistoricoPostgres()(cursor, SnapshotFalso(EXECUCAO, METRICAS, {"electronics": 7, "jewelery": 9}))
-        self.assertIn(f"[SHOPBRASIL][HISTORICO] run={EXECUCAO.run_id}: 2 linha(s) gravada(s), 0 já registrada(s)", logs.output[0])
-
-    def test_log_conta_linhas_preservadas_no_reprocessamento(self):
-        iguais = [(7, Decimal("10.00"), Decimal("10.00"), Decimal("10.01"), 3),
-                  (9, Decimal("10.01"), Decimal("10.00"), Decimal("10.01"), 2)]
-        cursor = CursorFalso(historico_da_run=iguais)
-        with self.assertLogs("shopbrasil_pipeline.infraestrutura.historico_postgres", "INFO") as logs:
-            RegistrarHistoricoPostgres()(cursor, SnapshotFalso(EXECUCAO, METRICAS, {"electronics": 7, "jewelery": 9}))
-        self.assertIn("0 linha(s) gravada(s), 2 já registrada(s) preservada(s)", logs.output[0])
-
 
 class PublicacaoComHistoricoTest(unittest.TestCase):
-    def setUp(self):
-        # patch.dict restaura sys.modules ao final, descartando também o adaptador importado aqui.
-        patcher = mock.patch.dict(sys.modules, _provider_falso())
-        patcher.start()
-        self.addCleanup(patcher.stop)
-        sys.modules.pop("shopbrasil_pipeline.infraestrutura.publicacao_postgres", None)
-        from shopbrasil_pipeline.infraestrutura import publicacao_postgres
-
-        self.modulo = publicacao_postgres
-
     def _publicar(self, cursor: CursorFalso) -> ConexaoFalsa:
         conexao = ConexaoFalsa(cursor)
-        publicador = self.modulo.PublicadorSnapshotPostgres(
-            etapas_adicionais=(RegistrarHistoricoPostgres(),), abrir_conexao=lambda: conexao
-        )
         try:
-            publicador.publicar_snapshot(EXECUCAO, METRICAS)
+            PublicadorSnapshotPostgres(abrir_conexao=lambda: conexao).publicar_snapshot(EXECUCAO, METRICAS)
         finally:
             self.assertTrue(conexao.fechada)
         return conexao
@@ -218,7 +172,7 @@ class PublicacaoComHistoricoTest(unittest.TestCase):
 
     def test_log_da_publicacao_informa_linhas_substituidas_depois_do_commit(self):
         cursor = CursorFalso(linhas_do_dia=4)
-        with self.assertLogs("shopbrasil_pipeline.infraestrutura.publicacao_postgres", "INFO") as logs:
+        with self.assertLogs(LOGGER, "INFO") as logs:
             conexao = self._publicar(cursor)
         self.assertEqual(conexao.desfecho, "commit")
         self.assertIn(
@@ -226,25 +180,23 @@ class PublicacaoComHistoricoTest(unittest.TestCase):
             "do dia substituída(s) por 2; categoria(s) nova(s) no cadastro: electronics, jewelery",
             logs.output[0],
         )
+        self.assertIn(f"[SHOPBRASIL][HISTORICO] run={EXECUCAO.run_id}: 2 linha(s) gravada(s), 0 já registrada(s)", logs.output[1])
+
+    def test_log_conta_linhas_preservadas_no_reprocessamento(self):
+        iguais = [(1, Decimal("10.00"), Decimal("10.00"), Decimal("10.01"), 3),
+                  (2, Decimal("10.01"), Decimal("10.00"), Decimal("10.01"), 2)]
+        with self.assertLogs(LOGGER, "INFO") as logs:
+            self._publicar(CursorFalso(historico_da_run=iguais))
+        self.assertIn("0 linha(s) gravada(s), 2 já registrada(s) preservada(s)", logs.output[1])
 
     def test_falha_no_historico_reverte_a_publicacao(self):
         cursor = CursorFalso(falhar_em="metricas_categoria_historico")
         conexao = ConexaoFalsa(cursor)
-        publicador = self.modulo.PublicadorSnapshotPostgres(
-            etapas_adicionais=(RegistrarHistoricoPostgres(),), abrir_conexao=lambda: conexao
-        )
-        with self.assertNoLogs("shopbrasil_pipeline.infraestrutura.publicacao_postgres", "INFO"):
+        with self.assertNoLogs(LOGGER, "INFO"):
             with self.assertRaisesRegex(RuntimeError, "falha simulada"):
-                publicador.publicar_snapshot(EXECUCAO, METRICAS)
+                PublicadorSnapshotPostgres(abrir_conexao=lambda: conexao).publicar_snapshot(EXECUCAO, METRICAS)
         self.assertEqual(conexao.desfecho, "rollback")
         self.assertTrue(conexao.fechada)
-
-    def test_composicao_liga_o_historico_na_publicacao(self):
-        from shopbrasil_pipeline import composicao
-
-        caso_de_uso = composicao.publicar_snapshot()
-        etapas = caso_de_uso._repositorio._etapas
-        self.assertEqual([type(e) for e in etapas], [RegistrarHistoricoPostgres])
 
 
 if __name__ == "__main__":

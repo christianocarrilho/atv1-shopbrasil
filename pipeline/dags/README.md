@@ -14,3 +14,5 @@ Define o DAG `shopbrasil_metricas`, suas tasks, callbacks e o operador próprio.
 | `publicacao` | `publicar` | Snapshot do dia e histórico da run numa transação, pela composição |
 
 Agenda: `CronTriggerTimetable("0 6 * * *")` em `America/Sao_Paulo`, `catchup=False`.
+
+Os callbacks ficam no próprio DAG e escrevem as linhas `[SHOPBRASIL][...]` pelas funções de [aplicacao/alertas.py](../shopbrasil_pipeline/aplicacao/alertas.py). [ajustes_e2e.py](ajustes_e2e.py) só encurta o atraso do retry e pausa o cálculo quando a suíte E2E define as variáveis; sem elas, valem os valores de produção declarados no DAG.

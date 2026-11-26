@@ -1,31 +1,30 @@
-"""Adaptador PostgreSQL da publicação transacional do snapshot diário (#17).
+"""Adaptador PostgreSQL da publicação transacional do snapshot diário e do histórico (#17, #18).
 
 Autor: Christiano Henrique Carrilho Lopes da Silva
 Código de pessoa: 1691353
 Matrícula: 262987
 
 Implementa ``RepositorioPublicacao`` com ``PostgresHook`` e a Connection ``shopbrasil_postgres``,
-que usa a conta de escrita (DML sem DDL). Numa única transação: cadastra os códigos novos,
-resolve ``categoria_id`` pelo código, apaga o snapshot da data de referência e insere o conjunto
-recebido. Apagar e reinserir o conjunto do dia, em vez de fazer upsert linha a linha, é o que tira
-do snapshot a categoria ausente da coleta sem tocar nas outras datas nem no cadastro.
+que usa a conta de escrita (DML sem DDL). Numa única transação:
 
-Ponto de extensão da #18: ``etapas_adicionais`` recebe objetos ``EtapaTransacional`` que rodam
-com o mesmo cursor, depois do snapshot e antes do único commit. Uma exceção numa etapa desfaz
-cadastro e snapshot juntos.
+1. cadastra os códigos de categoria novos (``ON CONFLICT DO NOTHING``) e resolve ``categoria_id``;
+2. apaga o snapshot da data de referência e insere o conjunto recebido. Apagar e reinserir o dia,
+   em vez de fazer upsert linha a linha, é o que tira do snapshot a categoria ausente da coleta sem
+   tocar nas outras datas nem no cadastro;
+3. acrescenta o histórico por run (``ON CONFLICT (run_id, categoria_id) DO NOTHING``): uma run nova
+   acrescenta linhas e o reprocessamento da mesma run preserva as já registradas.
 
-Depois do commit, uma linha ``[SHOPBRASIL][PUBLICACAO]`` informa quantas linhas do dia foram
-substituídas, para que o log da task mostre a idempotência sem consulta ao banco.
+Uma falha em qualquer passo desfaz os três. Depois do commit, as linhas ``[SHOPBRASIL][PUBLICACAO]``
+e ``[SHOPBRASIL][HISTORICO]`` mostram no log quantas linhas foram substituídas, gravadas e
+preservadas, sem consulta ao banco. O provider do Airflow é importado só ao abrir a conexão, para
+que os testes unitários rodem apenas com a biblioteca padrão.
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
-from typing import Any, Protocol
-
-from airflow.providers.postgres.hooks.postgres import PostgresHook
+from typing import Any
 
 from shopbrasil_pipeline.aplicacao.execucao import Execucao
 from shopbrasil_pipeline.aplicacao.publicacao import ResultadoPublicacao
@@ -55,48 +54,75 @@ INSERT INTO public.metricas_categoria
 VALUES (%s, %s, %s, %s, %s, %s)
 """
 
+_SQL_LER_HISTORICO_DA_RUN = """
+SELECT categoria_id, preco_medio, preco_minimo, preco_maximo, quantidade_produtos
+  FROM public.metricas_categoria_historico
+ WHERE run_id = %s AND categoria_id = ANY(%s)
+"""
 
-@dataclass(frozen=True)
-class SnapshotNaTransacao:
-    """O que uma etapa adicional recebe: a publicação em curso e os ids já resolvidos."""
+_SQL_INSERIR_HISTORICO = """
+INSERT INTO public.metricas_categoria_historico
+    (run_id, categoria_id, data_execucao, preco_medio, preco_minimo, preco_maximo, quantidade_produtos)
+VALUES (%s, %s, %s, %s, %s, %s, %s)
+ON CONFLICT (run_id, categoria_id) DO NOTHING
+"""
 
-    execucao: Execucao
-    metricas: tuple[MetricasCategoria, ...]
-    categoria_ids: Mapping[str, int]
+AVISO_DIVERGENCIA = (
+    "[SHOPBRASIL][AVISO] histórico preservado diverge do snapshot: run=%s categoria=%s "
+    "histórico=%s snapshot=%s (reprocessamento da mesma run mantém a linha original)"
+)
 
 
-class EtapaTransacional(Protocol):
-    """Gravação extra que compartilha a transação da publicação (ponto de extensão da #18).
+def _abrir_conexao_do_hook(conn_id: str) -> Any:
+    from airflow.providers.postgres.hooks.postgres import PostgresHook
 
-    Recebe o cursor da transação aberta. Deve usar só esse cursor, sem ``commit``, ``rollback``
-    nem nova conexão. Para abortar a publicação inteira, basta lançar uma exceção.
+    return PostgresHook(postgres_conn_id=conn_id).get_conn()
+
+
+def _valores(m: MetricasCategoria) -> tuple:
+    return (m.preco_medio, m.preco_minimo, m.preco_maximo, m.quantidade_produtos)
+
+
+def _gravar_historico(
+    cursor: Any, execucao: Execucao, metricas: Sequence[MetricasCategoria], categoria_ids: Mapping[str, int]
+) -> int:
+    """Acrescenta o histórico da run no cursor da transação aberta e devolve quantas linhas já existiam.
+
+    Antes do INSERT, lê as linhas que a run já tem (as que o ``ON CONFLICT`` vai preservar) e avisa
+    cada categoria cujo valor publicado agora difere do registrado, para que a diferença entre
+    snapshot e histórico nunca passe em silêncio.
     """
-
-    def __call__(self, cursor: Any, snapshot: SnapshotNaTransacao) -> None: ...
-
-
-def _conexao_do_hook(conn_id: str) -> Callable[[], Any]:
-    def abrir() -> Any:
-        return PostgresHook(postgres_conn_id=conn_id).get_conn()
-
-    return abrir
+    publicados = {categoria_ids[m.codigo_categoria]: m for m in metricas}
+    cursor.execute(_SQL_LER_HISTORICO_DA_RUN, (execucao.run_id, list(publicados)))
+    registradas = cursor.fetchall()
+    for categoria_id, *registrado in registradas:
+        metrica = publicados[categoria_id]
+        if tuple(registrado) != _valores(metrica):
+            log.warning(
+                AVISO_DIVERGENCIA,
+                execucao.run_id,
+                metrica.codigo_categoria,
+                "/".join(map(str, registrado)),
+                "/".join(map(str, _valores(metrica))),
+            )
+    # Os mesmos objetos Decimal do snapshot vão ao driver, por isso os valores coincidem.
+    cursor.executemany(
+        _SQL_INSERIR_HISTORICO,
+        [
+            (execucao.run_id, categoria_ids[m.codigo_categoria], execucao.data_referencia, *_valores(m))
+            for m in metricas
+        ],
+    )
+    return len(registradas)
 
 
 class PublicadorSnapshotPostgres:
     """Repositório de publicação sobre a Connection do Airflow."""
 
-    def __init__(
-        self,
-        conn_id: str = CONN_ID_PADRAO,
-        etapas_adicionais: Sequence[EtapaTransacional] = (),
-        abrir_conexao: Callable[[], Any] | None = None,
-    ) -> None:
-        self._abrir_conexao = abrir_conexao or _conexao_do_hook(conn_id)
-        self._etapas = tuple(etapas_adicionais)
+    def __init__(self, conn_id: str = CONN_ID_PADRAO, abrir_conexao: Callable[[], Any] | None = None) -> None:
+        self._abrir_conexao = abrir_conexao or (lambda: _abrir_conexao_do_hook(conn_id))
 
-    def publicar_snapshot(
-        self, execucao: Execucao, metricas: Sequence[MetricasCategoria]
-    ) -> ResultadoPublicacao:
+    def publicar_snapshot(self, execucao: Execucao, metricas: Sequence[MetricasCategoria]) -> ResultadoPublicacao:
         codigos = [m.codigo_categoria for m in metricas]
         conexao = self._abrir_conexao()
         try:
@@ -106,10 +132,11 @@ class PublicadorSnapshotPostgres:
             with conexao:
                 with conexao.cursor() as cursor:
                     cursor.execute(_SQL_CADASTRAR, (codigos,))
-                    cadastrados = {linha[0] for linha in cursor.fetchall()}
+                    novos = {linha[0] for linha in cursor.fetchall()}
+                    cadastrados = [c for c in codigos if c in novos]
 
                     cursor.execute(_SQL_RESOLVER, (codigos,))
-                    categoria_ids = {codigo: categoria_id for codigo, categoria_id in cursor.fetchall()}
+                    categoria_ids = dict(cursor.fetchall())
                     faltantes = [c for c in codigos if c not in categoria_ids]
                     if faltantes:
                         raise RuntimeError(f"categorias sem id após o cadastro: {faltantes}")
@@ -119,22 +146,10 @@ class PublicadorSnapshotPostgres:
                     # Decimal e date vão direto ao driver, que os envia como numeric e date.
                     cursor.executemany(
                         _SQL_INSERIR,
-                        [
-                            (
-                                categoria_ids[m.codigo_categoria],
-                                execucao.data_referencia,
-                                m.preco_medio,
-                                m.preco_minimo,
-                                m.preco_maximo,
-                                m.quantidade_produtos,
-                            )
-                            for m in metricas
-                        ],
+                        [(categoria_ids[m.codigo_categoria], execucao.data_referencia, *_valores(m)) for m in metricas],
                     )
 
-                    snapshot = SnapshotNaTransacao(execucao, tuple(metricas), categoria_ids)
-                    for etapa in self._etapas:
-                        etapa(cursor, snapshot)
+                    preservadas = _gravar_historico(cursor, execucao, metricas, categoria_ids)
         finally:
             conexao.close()
 
@@ -145,11 +160,18 @@ class PublicadorSnapshotPostgres:
             execucao.data_referencia.isoformat(),
             substituidas,
             len(codigos),
-            ", ".join(c for c in codigos if c in cadastrados) or "nenhuma",
+            ", ".join(cadastrados) or "nenhuma",
+        )
+        log.info(
+            "[SHOPBRASIL][HISTORICO] run=%s: %d linha(s) gravada(s), %d já registrada(s) "
+            "preservada(s) sem alteração",
+            execucao.run_id,
+            len(codigos) - preservadas,
+            preservadas,
         )
         return ResultadoPublicacao(
             run_id=execucao.run_id,
             data_referencia=execucao.data_referencia,
             categorias_publicadas=tuple(codigos),
-            categorias_cadastradas=tuple(c for c in codigos if c in cadastrados),
+            categorias_cadastradas=tuple(cadastrados),
         )
